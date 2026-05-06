@@ -124,7 +124,7 @@ class CreateServerDialog(Adw.Dialog):
             title="Server Icon",
             subtitle="No icon selected",
         )
-        self._choose_icon_btn = Gtk.Button()
+        self._choose_icon_btn = Gtk.Button(valign=Gtk.Align.CENTER)
         self._choose_icon_btn.add_css_class("flat")
         self._choose_icon_btn.set_tooltip_text("Choose server icon")
         self._choose_icon_btn.set_valign(Gtk.Align.CENTER)

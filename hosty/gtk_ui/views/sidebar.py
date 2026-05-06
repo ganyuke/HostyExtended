@@ -152,7 +152,7 @@ class Sidebar(Gtk.Box):
         header = Adw.HeaderBar()
         header.set_show_end_title_buttons(False)
         
-        add_btn = Gtk.Button(icon_name="list-add-symbolic")
+        add_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
         add_btn.set_tooltip_text("Create new server")
         add_btn.add_css_class("flat")
         add_btn.set_action_name("app.new-server")
@@ -162,7 +162,7 @@ class Sidebar(Gtk.Box):
         title.add_css_class("sidebar-header-title")
         header.set_title_widget(title)
         
-        menu_btn = Gtk.MenuButton()
+        menu_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER)
         menu_btn.set_icon_name("open-menu-symbolic")
         menu_btn.set_tooltip_text("Main menu")
         menu_btn.add_css_class("flat")

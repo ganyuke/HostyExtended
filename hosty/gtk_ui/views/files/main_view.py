@@ -287,7 +287,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         handler,
         destructive: bool = False,
     ) -> Gtk.Button:
-        b = Gtk.Button(icon_name=icon_name)
+        b = Gtk.Button(icon_name=icon_name, valign=Gtk.Align.CENTER)
         b.add_css_class("flat")
         if destructive:
             b.add_css_class("destructive-action")

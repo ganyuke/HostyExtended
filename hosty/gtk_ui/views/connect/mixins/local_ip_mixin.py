@@ -40,7 +40,7 @@ class LocalIpMixin:
         )
         row = Adw.ActionRow(title="Local device IP", subtitle="Detecting...")
         row.set_activatable(False)
-        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER)
         copy_btn.add_css_class("flat")
         copy_btn.set_tooltip_text("Copy local IP")
         copy_btn.connect("clicked", self._on_copy_local_ip)
