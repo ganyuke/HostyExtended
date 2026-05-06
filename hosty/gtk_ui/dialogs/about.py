@@ -15,12 +15,12 @@ def show_about_dialog(parent):
     about.set_application_name(APP_NAME)
     about.set_application_icon(APP_ID)
     about.set_version(APP_VERSION)
-    about.set_developer_name("Hosty Project")
+    about.set_developer_name("Sugarycandybar")
     about.set_license_type(Gtk.License.GPL_3_0)
     about.set_comments(
         "A modern application for creating, running, and managing\n"
         "Fabric Minecraft servers with ease."
     )
     about.set_website(APP_WEBSITE)
-    about.set_developers(["Hosty Contributors"])
+    about.set_developers(["Sugarycandybar"])
     about.present(parent)

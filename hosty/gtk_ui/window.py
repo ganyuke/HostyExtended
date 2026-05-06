@@ -91,6 +91,32 @@ class HostyWindow(Adw.ApplicationWindow):
         server_manager.connect('server-removed', self._on_server_removed)
 
         self._status_poll_id = GLib.timeout_add(1000, self._poll_runtime_state)
+        
+        self._quit_requested = False
+        self.connect("close-request", self._on_close_request)
+
+    def _on_close_request(self, window):
+        prefs = self._server_manager.preferences
+        if prefs.run_in_background_on_close and not self._quit_requested:
+            self.set_visible(False)
+            
+            from hosty.shared.utils.portal import set_background_status
+            set_background_status("Hosty running")
+            
+            if hasattr(self.get_application(), "_is_held_for_background"):
+                app = self.get_application()
+                if not app._is_held_for_background:
+                    app.hold()
+                    app._is_held_for_background = True
+                    
+            return True # stop close
+            
+        app = self.get_application()
+        if hasattr(app, "_is_held_for_background") and app._is_held_for_background:
+            app.release()
+            app._is_held_for_background = False
+            
+        return False # continue close
     
     def _on_server_selected(self, sidebar, server_id):
         """Handle server selection from sidebar."""

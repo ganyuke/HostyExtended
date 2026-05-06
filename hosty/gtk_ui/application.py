@@ -23,11 +23,20 @@ class HostyApplication(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id=APP_ID,
-            flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
         )
         self._server_manager = None
         self._window = None
+        self._activate_in_background = False
+        self._is_held_for_background = False
     
+    def do_command_line(self, command_line):
+        """Handle command line arguments."""
+        args = command_line.get_arguments()
+        self._activate_in_background = "--background" in args
+        self.activate()
+        return 0
+
     def do_startup(self):
         """Application startup - load CSS and setup actions."""
         Adw.Application.do_startup(self)
@@ -48,6 +57,31 @@ class HostyApplication(Adw.Application):
     
     def do_activate(self):
         """Application activate - show the window."""
+        autostart_ran = False
+        if not hasattr(self, "_autostarted_once"):
+            self._autostarted_once = True
+            autostart_server = self._server_manager.get_autostart_server()
+            if autostart_server:
+                proc = self._server_manager.get_process(autostart_server.id)
+                if proc and not proc.is_running:
+                    proc.start()
+                autostart_ran = True
+
+        if self._activate_in_background:
+            self._activate_in_background = False
+            if not self._is_held_for_background:
+                self.hold()
+                self._is_held_for_background = True
+            
+            # Start background services but don't show the window yet
+            if not self._window:
+                self._window = HostyWindow(
+                    server_manager=self._server_manager,
+                    application=self,
+                )
+            self._window.restore_from_background()
+            return
+
         if not self._window:
             self._window = HostyWindow(
                 server_manager=self._server_manager,
@@ -118,6 +152,11 @@ class HostyApplication(Adw.Application):
         action_icon.connect("activate", self._on_change_icon)
         self.add_action(action_icon)
         
+        # Quit
+        action_quit = Gio.SimpleAction.new("quit", None)
+        action_quit.connect("activate", self._on_quit)
+        self.add_action(action_quit)
+        
         # Delete server (parameterized)
         action_delete = Gio.SimpleAction.new("delete-server", GLib.VariantType.new("s"))
         action_delete.connect("activate", self._on_delete_server)
@@ -127,6 +166,7 @@ class HostyApplication(Adw.Application):
         self.set_accels_for_action("app.new-server", ["<Primary>n"])
         self.set_accels_for_action("app.about", ["<Primary>question"])
         self.set_accels_for_action("app.preferences", ["<Primary>comma"])
+        self.set_accels_for_action("app.quit", ["<Primary>q", "<Primary>w"])
     
     def _on_new_server(self, action, param):
         """Show create server dialog."""
@@ -151,6 +191,14 @@ class HostyApplication(Adw.Application):
         """Show about dialog."""
         from hosty.gtk_ui.dialogs.about import show_about_dialog
         show_about_dialog(self._window)
+        
+    def _on_quit(self, action, param):
+        """Quit the application."""
+        if self._window:
+            self._window._quit_requested = True
+            self._window.close()
+        else:
+            self.quit()
     
     def _on_preferences(self, action, param):
         """Show application preferences."""

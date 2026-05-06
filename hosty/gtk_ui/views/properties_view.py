@@ -54,6 +54,12 @@ class PropertiesView(Gtk.Box):
         
         # ===== General Group =====
         general = Adw.PreferencesGroup(title="General")
+        
+        self._autostart_row = Adw.SwitchRow(
+            title="Start on Launch",
+            subtitle="Start this server automatically when Hosty opens",
+        )
+        general.add(self._autostart_row)
 
         self._widgets["motd"] = self._add_entry_row(
             general, "Message of the Day", "motd", "a hosty server"
@@ -185,7 +191,27 @@ class PropertiesView(Gtk.Box):
 
         if self._ram_row:
             self._ram_row.connect("changed", self._on_widget_changed)
-    
+
+        if self._autostart_row:
+            self._autostart_row.connect("notify::active", self._on_autostart_toggled)
+
+    def _on_autostart_toggled(self, row, _pspec):
+        if self._suppress_changes or not self._server_manager or not self._server_info:
+            return
+            
+        active = row.get_active()
+        success, err = self._server_manager.set_server_autostart(self._server_info.id, active)
+        
+        if not success:
+            # Revert the toggle and show error
+            self._suppress_changes = True
+            row.set_active(not active)
+            self._suppress_changes = False
+            
+            # Show toast/banner
+            self._banner.set_title(err)
+            self._banner.set_revealed(True)
+            
     def _add_entry_row(self, group, title, key, default):
         """Add an Adw.EntryRow to a group."""
         row = Adw.EntryRow(title=title)
@@ -264,6 +290,9 @@ class PropertiesView(Gtk.Box):
             self._ram_row.set_value(float(self._server_info.ram_mb))
         elif self._ram_row:
             self._ram_row.set_value(float(DEFAULT_RAM_MB))
+            
+        if hasattr(self, "_autostart_row") and self._server_info:
+            self._autostart_row.set_active(getattr(self._server_info, 'autostart', False))
         
         for key, widget in self._widgets.items():
             if isinstance(widget, Adw.EntryRow):

@@ -36,6 +36,7 @@ class ServerInfo:
         self.icon_path: str = data.get("icon_path", "")
         self.created_at: str = data.get("created_at", datetime.now().isoformat())
         self.path: str = data.get("path", "")
+        self.autostart: bool = data.get("autostart", False)
     
     @property
     def server_dir(self) -> Path:
@@ -55,6 +56,7 @@ class ServerInfo:
             "icon_path": self.icon_path,
             "created_at": self.created_at,
             "path": str(self.server_dir),
+            "autostart": self.autostart,
         }
 
 
@@ -150,6 +152,29 @@ class ServerManager(EventEmitter):
             info.icon_path = icon_path
             self._save()
             self.emit_on_main_thread('server-changed', server_id)
+
+    def get_autostart_server(self) -> Optional[ServerInfo]:
+        """Get the server configured to auto-start, if any."""
+        for server in self._servers.values():
+            if server.autostart:
+                return server
+        return None
+
+    def set_server_autostart(self, server_id: str, autostart: bool) -> tuple[bool, Optional[str]]:
+        """Enable or disable autostart for a server. Returns (success, error_msg)."""
+        info = self._servers.get(server_id)
+        if not info:
+            return False, "Server not found."
+            
+        if autostart:
+            existing = self.get_autostart_server()
+            if existing and existing.id != server_id:
+                return False, f"Server '{existing.name}' is already configured to start on startup."
+                
+        info.autostart = autostart
+        self._save()
+        self.emit_on_main_thread('server-changed', server_id)
+        return True, None
     
     def update_server_ram(self, server_id: str, ram_mb: int):
         """Update RAM allocation for a server."""

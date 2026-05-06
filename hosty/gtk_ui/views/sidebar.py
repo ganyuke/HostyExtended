@@ -169,6 +169,7 @@ class Sidebar(Gtk.Box):
         menu = Gio.Menu()
         menu.append("Preferences", "app.preferences")
         menu.append("About Hosty", "app.about")
+        menu.append("Quit", "app.quit")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
         
