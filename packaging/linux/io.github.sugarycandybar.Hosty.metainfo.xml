@@ -37,14 +37,19 @@
     <keyword>mc</keyword>
   </keywords>
   <branding>
-    <color type="primary" scheme_preference="light">#33d17a</color>
-    <color type="primary" scheme_preference="dark">#1e3a2f</color>
+    <color type="primary" scheme_preference="light">#3cc781</color>
+    <color type="primary" scheme_preference="dark">#1a472c</color>
   </branding>
   <launchable type="desktop-id">io.github.sugarycandybar.Hosty.desktop</launchable>
   <url type="homepage">https://github.com/sugarycandybar/Hosty</url>
   <url type="bugtracker">https://github.com/sugarycandybar/Hosty/issues</url>
   <url type="vcs-browser">https://github.com/sugarycandybar/Hosty</url>
   <releases>
+    <release version="1.6.0" date="2026-05-6">
+      <description>
+        <p>Added startup and running in background</p>
+      </description>
+    </release>
     <release version="1.5.2" date="2026-04-20">
       <description>
         <p>Updated store page metadata and screenshots</p>
