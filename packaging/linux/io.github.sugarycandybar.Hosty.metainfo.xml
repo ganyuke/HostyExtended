@@ -47,7 +47,7 @@
   <releases>
     <release version="1.6.0" date="2026-05-6">
       <description>
-        <p>Added startup and running in background</p>
+        <p>Added startup and running in background preferences</p>
       </description>
     </release>
     <release version="1.5.2" date="2026-04-20">
