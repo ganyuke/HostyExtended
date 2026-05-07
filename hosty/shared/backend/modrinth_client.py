@@ -102,6 +102,28 @@ def _download_bytes(url: str, timeout: float = 120.0) -> bytes:
         return resp.read()
 
 
+def get_icon_path(url: str, timeout: float = 20.0) -> Optional[str]:
+    """Download an icon from a URL and cache it to disk, returning the local file path."""
+    if not url:
+        return None
+    from hosty.shared.utils.constants import CACHE_DIR
+
+    icon_cache_dir = CACHE_DIR / "modrinth_icons"
+    icon_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    hash_name = hashlib.md5(url.encode("utf-8")).hexdigest() + ".png"
+    target = icon_cache_dir / hash_name
+    if target.is_file():
+        return str(target)
+
+    try:
+        data = _download_bytes(url, timeout=timeout)
+        target.write_bytes(data)
+        return str(target)
+    except Exception:
+        return None
+
+
 def _safe_target(root: Path, relative_path: str) -> Optional[Path]:
     rel = str(relative_path or "").replace("\\", "/").lstrip("/")
     if not rel:

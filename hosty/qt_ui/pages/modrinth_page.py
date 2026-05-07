@@ -543,10 +543,14 @@ class ModrinthPage(QWidget):
         """Load an icon from URL asynchronously and set it on a QLabel."""
         def worker():
             try:
-                import urllib.request
-                req = urllib.request.Request(url, headers={"User-Agent": "Hosty/1.0"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = resp.read()
+                from hosty.shared.backend import modrinth_client
+                path = modrinth_client.get_icon_path(url)
+                if not path:
+                    return
+
+                with open(path, "rb") as f:
+                    data = f.read()
+
                 img = QImage()
                 img.loadFromData(data)
                 if img.isNull():

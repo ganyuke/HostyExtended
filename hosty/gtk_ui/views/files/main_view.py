@@ -39,9 +39,13 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_hexpand(True)
         self._server_info: Optional[ServerInfo] = None
         self._server_manager: Optional[ServerManager] = None
         self._root_page: Optional[Adw.NavigationPage] = None
+        self._push_fullscreen_page_cb = None
+        self._modrinth_page = None
+        self._modrinth_header = None
 
         self._worlds_group: Optional[Adw.PreferencesGroup] = None
         self._mods_group: Optional[Adw.PreferencesGroup] = None
@@ -70,6 +74,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
 
         self._nav = Adw.NavigationView()
         self._nav.set_vexpand(True)
+        self._nav.set_hexpand(True)
         self.append(self._nav)
 
         root_content = self._build_root_content()
@@ -161,6 +166,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                 if self._nav.get_visible_page() == self._root_page:
                     break
                 self._nav.pop()
+
 
     def _server_dir(self) -> Optional[Path]:
         if not self._server_info:

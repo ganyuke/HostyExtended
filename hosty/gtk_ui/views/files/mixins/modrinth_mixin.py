@@ -36,13 +36,22 @@ from ..utils import *
 class ModrinthMixin:
     def _push_modrinth_page(self, *_args) -> None:
         page = Adw.NavigationPage(title="Modrinth", child=self._build_modrinth_page())
-        self._nav.push(page)
+        self._modrinth_page = page
+        if self._push_fullscreen_page_cb:
+            # Push onto the outer nav to overlay the tab bar
+            if self._modrinth_header:
+                self._modrinth_header.set_show_end_title_buttons(True)
+            self._push_fullscreen_page_cb(page)
+        else:
+            self._nav.push(page)
 
     def _build_modrinth_page(self) -> Gtk.Widget:
         from hosty.shared.backend import modrinth_client
 
         tv = Adw.ToolbarView()
+        tv.set_hexpand(True)
         header = Adw.HeaderBar()
+        self._modrinth_header = header
         header.set_show_start_title_buttons(True)
         header.set_show_end_title_buttons(False)
 
@@ -59,6 +68,7 @@ class ModrinthMixin:
         tv.add_top_bar(header)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer.set_hexpand(True)
         outer.set_margin_start(18)
         outer.set_margin_end(18)
         outer.set_margin_top(12)
@@ -315,12 +325,14 @@ class ModrinthMixin:
     def _load_icon_async(self, image: Gtk.Image, url: str) -> None:
         def worker():
             try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": "Hosty/1.0 (+https://github.com/hosty)"},
-                )
-                with urllib.request.urlopen(req, timeout=20.0) as resp:
-                    data = resp.read()
+                from hosty.shared.backend import modrinth_client
+                path = modrinth_client.get_icon_path(url)
+                if not path:
+                    return
+
+                with open(path, "rb") as f:
+                    data = f.read()
+
                 loader = GdkPixbuf.PixbufLoader.new()
                 loader.write(data)
                 loader.close()

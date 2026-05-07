@@ -42,11 +42,11 @@ class BackupsMixin:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _build_subpage_shell(self, title: str, content: Gtk.Widget) -> Gtk.Widget:
+    def _build_subpage_shell(self, title: str, content: Gtk.Widget, show_controls: bool = False) -> Gtk.Widget:
         tv = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_show_start_title_buttons(True)
-        header.set_show_end_title_buttons(False)
+        header.set_show_end_title_buttons(show_controls)
 
         title_lbl = Gtk.Label(label=title)
         title_lbl.add_css_class("heading")
@@ -57,10 +57,18 @@ class BackupsMixin:
         return tv
 
     def _push_backups_page(self, *_args) -> None:
-        page = Adw.NavigationPage(title="Backups", child=self._build_backups_page())
-        self._nav.push(page)
+        show_fullscreen = self._push_fullscreen_page_cb is not None
+        page = Adw.NavigationPage(
+            title="Backups", 
+            child=self._build_backups_page(show_controls=show_fullscreen)
+        )
+        
+        if show_fullscreen:
+            self._push_fullscreen_page_cb(page)
+        else:
+            self._nav.push(page)
 
-    def _build_backups_page(self) -> Gtk.Widget:
+    def _build_backups_page(self, show_controls: bool = False) -> Gtk.Widget:
         page = Adw.PreferencesPage()
 
         actions = Adw.PreferencesGroup(title="Actions")
@@ -92,7 +100,7 @@ class BackupsMixin:
         sw = Gtk.ScrolledWindow()
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sw.set_child(page)
-        return self._build_subpage_shell("Backups", sw)
+        return self._build_subpage_shell("Backups", sw, show_controls=show_controls)
 
     def _refresh_backup_list(self) -> None:
         if hasattr(self, "_refresh_backups_row_subtitle"):

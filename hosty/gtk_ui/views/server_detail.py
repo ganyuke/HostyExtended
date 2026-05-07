@@ -46,7 +46,18 @@ class ServerDetailView(Gtk.Box):
         self._toolbar_view = Adw.ToolbarView()
         self._toolbar_view.set_hexpand(True)
         self._toolbar_view.set_vexpand(True)
-        self.append(self._toolbar_view)
+
+        # Outer NavigationView so fullscreen pages (Modrinth) can overlay the tab bar
+        self._outer_nav = Adw.NavigationView()
+        self._outer_nav.set_hexpand(True)
+        self._outer_nav.set_vexpand(True)
+        self._outer_nav_root = Adw.NavigationPage(title="Server Detail", child=self._toolbar_view)
+        try:
+            self._outer_nav_root.set_tag("hosty-detail-root")
+        except Exception:
+            pass
+        self._outer_nav.push(self._outer_nav_root)
+        self.append(self._outer_nav)
         
         # ===== Header Bar =====
         self._header = Adw.HeaderBar()
@@ -148,10 +159,15 @@ class ServerDetailView(Gtk.Box):
     def _ensure_files_view(self) -> FilesView:
         if self._files_view is None:
             self._files_view = FilesView()
+            self._files_view._push_fullscreen_page_cb = self._push_fullscreen_page
             self._tab_hosts["files"].append(self._files_view)
             if self._current_server:
                 self._files_view.set_server(self._current_server, self._server_manager)
         return self._files_view
+
+    def _push_fullscreen_page(self, page):
+        """Push a fullscreen page onto the outer nav, overlaying the tab bar."""
+        self._outer_nav.push(page)
 
     def _on_switcher_title_visible_changed(self, *_args):
         """Reveal the bottom switcher only in compact layouts."""
@@ -164,6 +180,12 @@ class ServerDetailView(Gtk.Box):
     
     def load_server(self, server_info: ServerInfo):
         """Load a server's details into the view."""
+        # Pop any fullscreen overlay pages (like Modrinth) back to root
+        try:
+            self._outer_nav.pop_to_tag("hosty-detail-root")
+        except Exception:
+            pass
+
         self._current_server = server_info
         
         if not server_info:

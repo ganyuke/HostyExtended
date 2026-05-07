@@ -35,10 +35,18 @@ from ..utils import *
 
 class PlayersMixin:
     def _push_players_page(self, *_args) -> None:
-        page = Adw.NavigationPage(title="Players", child=self._build_players_page())
-        self._nav.push(page)
+        show_fullscreen = self._push_fullscreen_page_cb is not None
+        page = Adw.NavigationPage(
+            title="Players", 
+            child=self._build_players_page(show_controls=show_fullscreen)
+        )
+        
+        if show_fullscreen:
+            self._push_fullscreen_page_cb(page)
+        else:
+            self._nav.push(page)
 
-    def _build_players_page(self) -> Gtk.Widget:
+    def _build_players_page(self, show_controls: bool = False) -> Gtk.Widget:
         page = Adw.PreferencesPage()
 
         actions = Adw.PreferencesGroup(
@@ -79,7 +87,7 @@ class PlayersMixin:
         sw = Gtk.ScrolledWindow()
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sw.set_child(page)
-        return self._build_subpage_shell("Players", sw)
+        return self._build_subpage_shell("Players", sw, show_controls=show_controls)
 
     def _player_list_paths(self) -> tuple[Optional[Path], Optional[Path]]:
         root = self._server_dir()
