@@ -804,6 +804,12 @@ class PlayitManager(EventEmitter):
             if tunnel.port == int(port) and not tunnel.in_use:
                 return tunnel
 
+        for tunnel in self.tunnels.get(protocol, []):
+            if not tunnel.in_use:
+                if self._update_tunnel_local_port(tunnel.id, port):
+                    tunnel.port = int(port)
+                    return tunnel
+
         if not ensure:
             return None
 

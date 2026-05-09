@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -60,12 +61,15 @@ class WorldsPage(QWidget):
         self._scroll = SmoothScrollArea()
         self._world_list = QListWidget()
         self._world_list.itemDoubleClicked.connect(self._open_selected_world)
+        self._world_list.itemSelectionChanged.connect(self._on_world_selected)
         content_layout.addWidget(self._world_list)
 
-        open_btn = QPushButton("Open Selected World Folder")
-        open_btn.setProperty("class", "accent")
-        open_btn.clicked.connect(self._open_selected_world)
-        content_layout.addWidget(open_btn)
+        settings_btn = QPushButton("⚙ World Settings")
+        settings_btn.setProperty("class", "accent")
+        settings_btn.clicked.connect(self._on_world_settings)
+        self._settings_btn = settings_btn
+        self._settings_btn.setEnabled(False)
+        content_layout.addWidget(settings_btn)
 
         layout.addWidget(content, 1)
 
@@ -90,3 +94,59 @@ class WorldsPage(QWidget):
         world_path = item.data(Qt.ItemDataRole.UserRole)
         if world_path and not _open_path(Path(world_path)):
             QMessageBox.warning(self, "Open World", "Could not open selected world folder")
+
+    def _on_world_selected(self) -> None:
+        """Enable settings button when a world is selected."""
+        self._settings_btn.setEnabled(self._world_list.currentItem() is not None)
+
+    def _on_world_settings(self) -> None:
+        """Show world settings dialog."""
+        item = self._world_list.currentItem()
+        if not item:
+            QMessageBox.information(self, "Worlds", "Select a world first.")
+            return
+        
+        world_path = item.data(Qt.ItemDataRole.UserRole)
+        if not world_path:
+            return
+        
+        path = Path(world_path)
+        
+        # Create a simple dialog with options
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"World Settings: {path.name}")
+        dialog.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(dialog)
+        
+        label = QLabel(f"Managing world: {path.name}")
+        layout.addWidget(label)
+        
+        button_layout = QVBoxLayout()
+        
+        open_btn = QPushButton("Open World Folder")
+        open_btn.clicked.connect(lambda: self._open_and_close(path, dialog))
+        button_layout.addWidget(open_btn)
+        
+        export_btn = QPushButton("Export World")
+        export_btn.clicked.connect(lambda: self._export_and_close(path, dialog))
+        button_layout.addWidget(export_btn)
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.close)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def _open_and_close(self, path: Path, dialog: QDialog) -> None:
+        """Open world folder and close the dialog."""
+        if not _open_path(path):
+            QMessageBox.warning(self, "Open World", "Could not open selected world folder")
+        dialog.close()
+
+    def _export_and_close(self, path: Path, dialog: QDialog) -> None:
+        """Export world (placeholder for future implementation) and close dialog."""
+        QMessageBox.information(self, "Export World", f"Export functionality for {path.name} not yet implemented in Qt UI.")
+        dialog.close()

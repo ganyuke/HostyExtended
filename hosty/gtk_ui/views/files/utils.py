@@ -15,6 +15,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import zipfile
+import gzip
+import struct
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -28,6 +30,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
 
 from hosty.shared.backend.server_manager import ServerManager, ServerInfo
+from hosty.shared.utils.nbt_utils import get_world_seed as _world_seed
 
 __all__ = [
     "_open_uri",
@@ -39,6 +42,7 @@ __all__ = [
     "_format_mtime",
     "_format_compact_count",
     "_is_descendant_of",
+    "_world_seed",
 ]
 
 def _open_uri(uri: str) -> bool:
@@ -126,10 +130,16 @@ def _world_dirs(server_root: Path) -> list[Path]:
         return out
 
     level_name = _configured_level_name(server_root)
+    preferred = server_root / "world"
+    if _is_world_dir(preferred, level_name):
+        return [preferred]
+
     for item in server_root.iterdir():
         if _is_world_dir(item, level_name):
             out.append(item)
-    return sorted(out, key=lambda p: p.name.lower())
+    if not out:
+        return out
+    return [sorted(out, key=lambda p: p.name.lower())[0]]
 
 
 def _world_dimension_dirs(world_dir: Path) -> list[tuple[str, Path]]:
@@ -167,6 +177,9 @@ def _world_dimension_dirs(world_dir: Path) -> list[tuple[str, Path]]:
         unique.append((label, path))
 
     return unique
+
+
+# _world_seed is imported from hosty.shared.utils.nbt_utils
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -208,5 +221,4 @@ def _is_descendant_of(widget: Gtk.Widget, ancestor: Gtk.Widget) -> bool:
             return True
         current = current.get_parent()
     return False
-
 

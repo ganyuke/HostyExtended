@@ -109,7 +109,6 @@ class PropertiesMixin:
         world_lay = QVBoxLayout(world)
         world_lay.setSpacing(10)
 
-        self._prop_widgets["level-seed"] = self._add_prop_entry(world_lay, "World Seed", "level-seed", "")
         display_types = [LEVEL_TYPE_NAMES.get(t, t) for t in LEVEL_TYPES]
         self._prop_widgets["level-type"] = self._add_prop_combo(world_lay, "World Type", "level-type", display_types, "Default")
         self._prop_widgets["view-distance"] = self._add_prop_spin(world_lay, "View Distance", "view-distance", 2, 32, 10)

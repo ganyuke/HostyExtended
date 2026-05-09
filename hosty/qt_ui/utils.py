@@ -106,11 +106,17 @@ def _iter_world_dirs(server_root: Path) -> list[Path]:
     if not server_root.is_dir():
         return []
     level_name = _configured_level_name(server_root)
+    preferred = server_root / "world"
+    if _is_world_dir(preferred, level_name):
+        return [preferred]
+
     worlds = []
     for item in server_root.iterdir():
         if _is_world_dir(item, level_name):
             worlds.append(item)
-    return sorted(worlds, key=lambda p: p.name.lower())
+    if not worlds:
+        return []
+    return [sorted(worlds, key=lambda p: p.name.lower())[0]]
 
 
 def _status_prefix(status: str) -> str:

@@ -353,17 +353,182 @@ class ServerManager(EventEmitter):
         )
         return any((item / marker).exists() for marker in markers)
 
+    def _is_importable_world_dir(self, item: Path) -> bool:
+        if not item.is_dir():
+            return False
+        if not (item / "level.dat").is_file():
+            return False
+
+        markers = (
+            "region",
+            "data",
+            "playerdata",
+            "poi",
+            "entities",
+            "stats",
+            "advancements",
+            "dimensions",
+            "DIM-1",
+            "DIM1",
+            "session.lock",
+            "uid.dat",
+        )
+        return any((item / marker).exists() for marker in markers)
+
     def _iter_world_dirs(self, server_root: Path) -> list[Path]:
         if not server_root.is_dir():
             return []
 
         level_name = self._configured_level_name(server_root)
-        worlds = [
-            item
-            for item in server_root.iterdir()
-            if self._is_world_dir(item, level_name)
-        ]
-        return sorted(worlds, key=lambda p: p.name.lower())
+        preferred = server_root / "world"
+        if self._is_world_dir(preferred, level_name):
+            return [preferred]
+
+        worlds = [item for item in server_root.iterdir() if self._is_world_dir(item, level_name)]
+        if not worlds:
+            return []
+
+        worlds = sorted(worlds, key=lambda p: p.name.lower())
+        return [worlds[0]]
+
+    def _unique_world_destination(self, server_root: Path, name: str) -> Path:
+        safe_name = Path(name).name.strip() or "world"
+        candidate = server_root / safe_name
+        if not candidate.exists():
+            return candidate
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        candidate = server_root / f"{safe_name}-{stamp}"
+        suffix = 2
+        while candidate.exists():
+            candidate = server_root / f"{safe_name}-{stamp}-{suffix}"
+            suffix += 1
+        return candidate
+
+    def create_world_folder(self, server_id: str, name: str, seed: str = "") -> tuple[bool, str]:
+        """Create/select a new world folder and configure the server to generate it."""
+        info = self.get_server(server_id)
+        if not info:
+            return False, "Server not found"
+
+        process = self._processes.get(server_id)
+        if process and process.is_running:
+            return False, "Server is running"
+
+        root = info.server_dir
+        world_dir = root / "world"
+
+        try:
+            level_name = self._configured_level_name(root)
+            for item in root.iterdir():
+                if not self._is_world_dir(item, level_name):
+                    continue
+                if item.resolve() == world_dir.resolve():
+                    continue
+                if item.exists():
+                    shutil.rmtree(item, ignore_errors=True)
+
+            if world_dir.exists():
+                shutil.rmtree(world_dir, ignore_errors=True)
+
+            world_dir.mkdir(parents=True, exist_ok=True)
+            cfg = ConfigManager(root)
+            cfg.load()
+            cfg.set_value("level-name", "world")
+            cfg.set_value("level-seed", seed.strip())
+            cfg.save()
+        except Exception as e:
+            return False, str(e)
+
+        self.emit_on_main_thread("server-changed", server_id)
+        return True, world_dir.name
+
+    def import_world_folder(self, server_id: str, source: str | Path) -> tuple[bool, str]:
+        """Copy an existing world folder into a server and select it as level-name."""
+        info = self.get_server(server_id)
+        if not info:
+            return False, "Server not found"
+
+        process = self._processes.get(server_id)
+        if process and process.is_running:
+            return False, "Server is running"
+
+        src = Path(source).expanduser()
+        if not src.is_dir():
+            return False, "Selected world folder does not exist"
+        if not self._is_importable_world_dir(src):
+            return False, "Selected folder does not look like a Minecraft world"
+
+        root = info.server_dir
+        dst = root / "world"
+        try:
+            level_name = self._configured_level_name(root)
+            for item in root.iterdir():
+                if not self._is_world_dir(item, level_name):
+                    continue
+                if item.resolve() == dst.resolve():
+                    continue
+                if item.exists():
+                    shutil.rmtree(item, ignore_errors=True)
+
+            if dst.exists():
+                shutil.rmtree(dst, ignore_errors=True)
+
+            from hosty.shared.utils.nbt_utils import get_world_info
+            seed, wtype = get_world_info(src)
+
+            shutil.copytree(src, dst)
+            cfg = ConfigManager(root)
+            cfg.load()
+            cfg.set_value("level-name", "world")
+            if seed:
+                cfg.set_value("level-seed", seed)
+            else:
+                cfg.set_value("level-seed", "")
+            if wtype:
+                cfg.set_value("level-type", wtype)
+            cfg.save()
+        except Exception as e:
+            if dst.exists():
+                shutil.rmtree(dst, ignore_errors=True)
+            return False, str(e)
+
+        self.emit_on_main_thread("server-changed", server_id)
+        return True, dst.name
+
+    def export_world_zip(self, server_id: str, world: str | Path, destination: str | Path) -> tuple[bool, str]:
+        """Export one world folder to a zip archive."""
+        info = self.get_server(server_id)
+        if not info:
+            return False, "Server not found"
+
+        world_path = Path(world)
+        if not world_path.is_absolute():
+            world_path = info.server_dir / world_path
+        if not world_path.is_dir():
+            return False, "World folder does not exist"
+
+        try:
+            world_path.resolve().relative_to(info.server_dir.resolve())
+        except ValueError:
+            return False, "World folder is outside this server"
+
+        dest = Path(destination).expanduser()
+        if dest.suffix.lower() != ".zip":
+            dest = dest.with_suffix(".zip")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+                for item in world_path.rglob("*"):
+                    if not item.is_file():
+                        continue
+                    arc = Path(world_path.name) / item.relative_to(world_path)
+                    zf.write(item, arcname=str(arc).replace("\\", "/"))
+        except Exception as e:
+            return False, str(e)
+
+        return True, str(dest)
 
     def create_world_backup(self, server_id: str, auto: bool = False) -> tuple[bool, str]:
         """Create a zip backup containing world folders only."""
@@ -392,12 +557,12 @@ class ServerManager(EventEmitter):
 
         try:
             with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for world_dir in worlds:
-                    for item in world_dir.rglob("*"):
-                        if not item.is_file():
-                            continue
-                        arc = item.relative_to(root)
-                        zf.write(item, arcname=str(arc).replace("\\", "/"))
+                world_dir = worlds[0]
+                for item in world_dir.rglob("*"):
+                    if not item.is_file():
+                        continue
+                    arc = item.relative_to(root)
+                    zf.write(item, arcname=str(arc).replace("\\", "/"))
         except Exception as e:
             return False, str(e)
 

@@ -105,9 +105,6 @@ class PropertiesView(Gtk.Box):
         # ===== World Group =====
         world = Adw.PreferencesGroup(title="World")
         
-        self._widgets["level-seed"] = self._add_entry_row(
-            world, "World Seed", "level-seed", ""
-        )
         self._widgets["level-type"] = self._add_combo_row(
             world, "World Type", "level-type",
             [LEVEL_TYPE_NAMES.get(t, t) for t in LEVEL_TYPES],

@@ -107,6 +107,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         backups_row.connect("activated", self._push_backups_page)
         self._backups_row = backups_row
         self._worlds_group.add(backups_row)
+
         page.add(self._worlds_group)
 
         self._mods_group = Adw.PreferencesGroup(title="Mods")

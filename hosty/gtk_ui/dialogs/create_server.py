@@ -51,6 +51,7 @@ class CreateServerDialog(Adw.Dialog):
         self._game_versions: list[str] = []
         self._loader_versions: list[str] = []
         self._icon_source_path: str = ""
+        self._world_import_source_path: str = ""
         
         self.set_title("Create Server")
         self.set_content_width(500)
@@ -115,11 +116,6 @@ class CreateServerDialog(Adw.Dialog):
         self._name_entry.connect("changed", self._validate)
         info_group.add(self._name_entry)
 
-        self._seed_entry = Adw.EntryRow(title="World Seed")
-        self._seed_entry.set_text("")
-        self._seed_entry.set_show_apply_button(False)
-        info_group.add(self._seed_entry)
-
         self._icon_row = Adw.ActionRow(
             title="Server Icon",
             subtitle="No icon selected",
@@ -177,6 +173,24 @@ class CreateServerDialog(Adw.Dialog):
         if default_level_type in self._level_type_values:
             self._level_type_row.set_selected(self._level_type_values.index(default_level_type))
         world_group.add(self._level_type_row)
+
+        self._seed_entry = Adw.EntryRow(title="World Seed")
+        self._seed_entry.set_text("")
+        self._seed_entry.set_show_apply_button(False)
+        world_group.add(self._seed_entry)
+
+        self._world_import_row = Adw.ActionRow(
+            title="Import world folder",
+            subtitle="No world selected. Imported world's type must match World type.",
+        )
+        self._choose_world_btn = Gtk.Button(valign=Gtk.Align.CENTER)
+        self._choose_world_btn.add_css_class("flat")
+        self._choose_world_btn.set_tooltip_text("Choose world folder")
+        self._choose_world_btn.set_child(Gtk.Image.new_from_icon_name("folder-symbolic"))
+        self._choose_world_btn.connect("clicked", self._on_choose_world_folder)
+        self._world_import_row.add_suffix(self._choose_world_btn)
+        self._world_import_row.set_activatable_widget(self._choose_world_btn)
+        world_group.add(self._world_import_row)
 
         page.add(world_group)
 
@@ -379,6 +393,42 @@ class CreateServerDialog(Adw.Dialog):
         except GLib.Error:
             return
 
+    def _on_choose_world_folder(self, *_args):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Import World Folder")
+        dialog.select_folder(self.get_root(), None, self._on_world_folder_chosen)
+
+    def _on_world_folder_chosen(self, dialog, result):
+        try:
+            selected = dialog.select_folder_finish(result)
+            if not selected:
+                return
+            path = selected.get_path() or ""
+            if not path:
+                return
+            
+            from hosty.shared.utils.nbt_utils import get_world_info
+            seed, wtype = get_world_info(Path(path))
+            
+            self._world_import_source_path = path
+            
+            msg_parts = [f"{Path(path).name}"]
+            if seed:
+                self._seed_entry.set_text(seed)
+                msg_parts.append("Seed imported")
+            if wtype and wtype in self._level_type_values:
+                self._level_type_row.set_selected(self._level_type_values.index(wtype))
+                msg_parts.append("Type imported")
+                
+            if len(msg_parts) == 1:
+                self._world_import_row.set_subtitle(
+                    f"{Path(path).name} — world type must match the selected World type"
+                )
+            else:
+                self._world_import_row.set_subtitle(" · ".join(msg_parts))
+        except GLib.Error:
+            return
+
     def _on_page_changed(self, *_args):
         self._validate()
     
@@ -473,6 +523,7 @@ class CreateServerDialog(Adw.Dialog):
                 gamemode,
                 level_type,
                 self._icon_source_path,
+                self._world_import_source_path,
                 install_optimisations,
             ),
             daemon=True,
@@ -491,6 +542,7 @@ class CreateServerDialog(Adw.Dialog):
         gamemode,
         level_type,
         icon_source_path,
+        world_import_source_path,
         install_optimisations,
     ):
         """Background installation thread."""
@@ -585,6 +637,16 @@ class CreateServerDialog(Adw.Dialog):
             config.set_value("level-seed", seed)
             config.save()
             config.set_eula(True)
+
+            if world_import_source_path:
+                self._update_progress(0.90, "Importing world folder...", "World type must match the imported world")
+                success, msg = self._server_manager.import_world_folder(
+                    server_info.id,
+                    world_import_source_path,
+                )
+                if not success:
+                    self._show_error(f"Failed to import world: {msg}")
+                    return
 
             # Step 6: Save icon if selected
             if icon_source_path:

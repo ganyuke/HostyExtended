@@ -266,8 +266,31 @@ class BackupsMixin:
                     if not extracted_worlds:
                         raise RuntimeError("This backup does not contain any world data.")
 
+                    level_name = "world"
+                    for item in root.iterdir():
+                        if not item.is_dir():
+                            continue
+                        if (item / "level.dat").exists() or item.name.casefold() == level_name.casefold() or any(
+                            (item / marker).exists()
+                            for marker in (
+                                "region",
+                                "data",
+                                "playerdata",
+                                "poi",
+                                "entities",
+                                "stats",
+                                "advancements",
+                                "dimensions",
+                                "DIM-1",
+                                "DIM1",
+                                "session.lock",
+                                "uid.dat",
+                            )
+                        ):
+                            shutil.rmtree(item, ignore_errors=True)
+
                     for item in extracted_worlds:
-                        dst = root / item.name
+                        dst = root / "world"
                         if dst.is_dir():
                             shutil.rmtree(dst, ignore_errors=True)
                         shutil.copytree(item, dst, dirs_exist_ok=True)
