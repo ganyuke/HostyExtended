@@ -81,6 +81,7 @@ class PlayitMixin:
                 "auto_install": bool(self._cfg.get("auto_install", True)),
                 "java_endpoint": str(self._cfg.get("java_endpoint", "")).strip(),
                 "bedrock_endpoint": str(self._cfg.get("bedrock_endpoint", "")).strip(),
+                "voicechat_endpoint": str(self._cfg.get("voicechat_endpoint", "")).strip(),
             },
         )
 
@@ -121,6 +122,10 @@ class PlayitMixin:
             self._bedrock_domain_row.set_activatable(False)
             self._copy_bedrock_domain_btn.set_sensitive(False)
             self._copy_bedrock_domain_btn.set_visible(False)
+            self._voicechat_domain_row.set_subtitle("Not available")
+            self._voicechat_domain_row.set_activatable(False)
+            self._copy_voicechat_domain_btn.set_sensitive(False)
+            self._copy_voicechat_domain_btn.set_visible(False)
             self._java_tunnel_action_btn.set_label("")
             self._java_tunnel_action_btn.set_icon_name("list-add-symbolic")
             self._java_tunnel_action_btn.set_tooltip_text("Add Java tunnel")
@@ -133,6 +138,12 @@ class PlayitMixin:
             self._bedrock_tunnel_action_btn.remove_css_class("pill")
             self._bedrock_tunnel_action_btn.add_css_class("flat")
             self._bedrock_tunnel_action_btn.set_sensitive(False)
+            self._voicechat_tunnel_action_btn.set_label("")
+            self._voicechat_tunnel_action_btn.set_icon_name("list-add-symbolic")
+            self._voicechat_tunnel_action_btn.set_tooltip_text("Add Voice Chat tunnel")
+            self._voicechat_tunnel_action_btn.remove_css_class("pill")
+            self._voicechat_tunnel_action_btn.add_css_class("flat")
+            self._voicechat_tunnel_action_btn.set_sensitive(False)
             self._tunnel_btn.set_label("Start Agent")
             self._tunnel_btn.remove_css_class("destructive-action")
             self._tunnel_btn.add_css_class("suggested-action")
@@ -220,20 +231,47 @@ class PlayitMixin:
             self._bedrock_tunnel_action_btn.remove_css_class("flat")
             self._bedrock_tunnel_action_btn.add_css_class("flat")
 
+        voicechat_endpoint = str(self._cfg.get("voicechat_endpoint", "")).strip()
+        if voicechat_endpoint:
+            self._voicechat_domain_row.set_subtitle(voicechat_endpoint)
+            self._voicechat_domain_row.set_activatable(True)
+            self._copy_voicechat_domain_btn.set_sensitive(True)
+            self._copy_voicechat_domain_btn.set_visible(True)
+        else:
+            self._voicechat_domain_row.set_subtitle("Not available")
+            self._voicechat_domain_row.set_activatable(True)
+            self._copy_voicechat_domain_btn.set_sensitive(False)
+            self._copy_voicechat_domain_btn.set_visible(False)
+
+        if voicechat_endpoint:
+            self._voicechat_tunnel_action_btn.set_label("")
+            self._voicechat_tunnel_action_btn.set_icon_name("emblem-system-symbolic")
+            self._voicechat_tunnel_action_btn.set_tooltip_text("Manage Voice Chat tunnel")
+            self._voicechat_tunnel_action_btn.remove_css_class("pill")
+            self._voicechat_tunnel_action_btn.add_css_class("flat")
+        else:
+            self._voicechat_tunnel_action_btn.set_label("")
+            self._voicechat_tunnel_action_btn.set_icon_name("list-add-symbolic")
+            self._voicechat_tunnel_action_btn.set_tooltip_text("Add Voice Chat tunnel")
+            self._voicechat_tunnel_action_btn.remove_css_class("flat")
+            self._voicechat_tunnel_action_btn.add_css_class("flat")
+
         tunnel_actions_locked = bool(
             playit.is_running
             or self._start_in_progress
             or self._java_tunnel_in_progress
             or self._bedrock_in_progress
+            or self._voicechat_in_progress
         )
         self._java_tunnel_action_btn.set_sensitive(not tunnel_actions_locked)
         self._bedrock_tunnel_action_btn.set_sensitive(not tunnel_actions_locked)
+        self._voicechat_tunnel_action_btn.set_sensitive(not tunnel_actions_locked)
 
         if self._start_in_progress:
             self._tunnel_btn.set_label("Starting Agent...")
             self._tunnel_btn.set_sensitive(False)
             self._tunnel_btn.add_css_class("hosty-starting-button")
-        elif self._java_tunnel_in_progress or self._bedrock_in_progress:
+        elif self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress:
             self._tunnel_btn.set_sensitive(False)
             self._tunnel_btn.remove_css_class("hosty-starting-button")
         else:
@@ -292,6 +330,28 @@ class PlayitMixin:
             self._on_copy_bedrock_domain()
             return
         self._on_manage_bedrock_tunnel()
+
+    def _on_copy_voicechat_domain(self, *_args):
+        endpoint = str(self._cfg.get("voicechat_endpoint", "")).strip()
+        if not endpoint:
+            return
+
+        try:
+            display = Gdk.Display.get_default()
+            if not display:
+                return
+            clipboard = display.get_clipboard()
+            clipboard.set(endpoint)
+            self._toast("Voice Chat tunnel domain copied")
+        except Exception:
+            pass
+
+    def _on_voicechat_domain_row_activated(self, *_args):
+        endpoint = str(self._cfg.get("voicechat_endpoint", "")).strip()
+        if endpoint:
+            self._on_copy_voicechat_domain()
+            return
+        self._on_manage_voicechat_tunnel()
 
     def _on_tunnel_toggle(self, *_args):
         if not self._server_manager:
@@ -507,7 +567,90 @@ class PlayitMixin:
             dialog.present(self.get_root())
             return
 
-        start_operation()
+        self._confirm_mod_warning(
+            "Bedrock",
+            "Adding a Bedrock tunnel does not automatically add Bedrock support. Add the following mod to make it work: Geyser",
+            "https://modrinth.com/plugin/geyser",
+            start_operation
+        )
+
+    def _on_manage_voicechat_tunnel(self, *_args):
+        if not self._server_manager or not self._server_info:
+            return
+        if not self._is_setup_complete():
+            self._on_open_setup_dialog()
+            return
+        playit = self._server_manager.playit_manager
+        if playit.is_running:
+            self._alert("Stop agent first", "Stop the playit agent before changing Voice Chat tunnel settings.")
+            return
+        if self._start_in_progress:
+            self._toast("Playit startup is already in progress")
+            return
+        if self._java_tunnel_in_progress or self._bedrock_in_progress:
+            self._toast("A tunnel operation is already in progress")
+            return
+        if self._voicechat_in_progress:
+            self._toast("Voice Chat tunnel creation is already in progress")
+            return
+
+        self._save_server_config()
+        server_id = self._server_info.id
+        server_dir = str(self._server_info.server_dir)
+        secret = str(self._cfg.get("secret", "")).strip()
+        had_voicechat_tunnel = bool(str(self._cfg.get("voicechat_endpoint", "")).strip())
+
+        def start_operation():
+            self._voicechat_in_progress = True
+            self._refresh_status_row()
+
+            def run():
+                if had_voicechat_tunnel:
+                    ok, msg, endpoint = self._server_manager.playit_manager.regenerate_voicechat_tunnel(
+                        server_id,
+                        server_dir,
+                        secret=secret,
+                        auto_install=True,
+                    )
+                else:
+                    ok, msg, endpoint = self._server_manager.playit_manager.add_voicechat_tunnel(
+                        server_id,
+                        server_dir,
+                        secret=secret,
+                        auto_install=True,
+                    )
+
+                def ui_done():
+                    self._voicechat_in_progress = False
+                    if ok and endpoint:
+                        self._save_server_config({"voicechat_endpoint": endpoint})
+                        # Auto-configure the mod
+                        self._server_manager.playit_manager.configure_voicechat_mod(server_dir, server_id)
+                    self._refresh_status_row()
+                    if ok:
+                        self._toast(msg)
+                    else:
+                        self._alert("Could not update Voice Chat tunnel", msg)
+
+                GLib.idle_add(ui_done)
+
+            threading.Thread(target=run, daemon=True).start()
+
+        if had_voicechat_tunnel:
+            dialog = ManagePlayitTunnelDialog(
+                "Voice Chat", "Simple Voice Chat (UDP)", 24454, str(self._cfg.get("voicechat_endpoint", "")).strip()
+            )
+            dialog.connect("regenerate", lambda *_: self._confirm_regenerate_tunnel("Voice Chat", start_operation))
+            dialog.connect("delete", lambda *_: self._on_delete_voicechat_tunnel())
+            dialog.present(self.get_root())
+            return
+
+        self._confirm_mod_warning(
+            "Voice Chat",
+            "Adding a Voice Chat tunnel does not automatically add voice chat support. Add the following mod to make it work: Simple Voice Chat",
+            "https://modrinth.com/mod/simple-voice-chat",
+            start_operation
+        )
 
     def _on_delete_java_tunnel(self, *_args):
         if not self._server_manager or not self._server_info:
@@ -519,7 +662,7 @@ class PlayitMixin:
         if playit.is_running:
             self._alert("Stop agent first", "Stop the playit agent before deleting Java tunnel.")
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._start_in_progress:
+        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
             self._toast("A tunnel operation is already in progress")
             return
 
@@ -564,7 +707,7 @@ class PlayitMixin:
         if playit.is_running:
             self._alert("Stop agent first", "Stop the playit agent before deleting Bedrock tunnel.")
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._start_in_progress:
+        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
             self._toast("A tunnel operation is already in progress")
             return
 
@@ -599,13 +742,88 @@ class PlayitMixin:
 
         self._confirm_delete_tunnel("Bedrock", confirmed_delete)
 
+    def _on_delete_voicechat_tunnel(self, *_args):
+        if not self._server_manager or not self._server_info:
+            return
+        if not self._is_setup_complete():
+            self._on_open_setup_dialog()
+            return
+        playit = self._server_manager.playit_manager
+        if playit.is_running:
+            self._alert("Stop agent first", "Stop the playit agent before deleting Voice Chat tunnel.")
+            return
+        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
+            self._toast("A tunnel operation is already in progress")
+            return
+
+        def confirmed_delete():
+            self._voicechat_in_progress = True
+            self._refresh_status_row()
+            server_dir = str(self._server_info.server_dir)
+            secret = str(self._cfg.get("secret", "")).strip()
+
+            def run():
+                ok, msg = self._server_manager.playit_manager.delete_voicechat_tunnel(
+                    server_dir,
+                    secret=secret,
+                    auto_install=True,
+                )
+
+                def ui_done():
+                    self._voicechat_in_progress = False
+                    if ok or "No voice chat tunnel found" in str(msg):
+                        self._save_server_config({"voicechat_endpoint": ""})
+                    self._refresh_status_row()
+                    if ok:
+                        self._toast(msg)
+                    elif "No voice chat tunnel found" in str(msg):
+                        self._toast("Voice Chat tunnel already missing")
+                    else:
+                        self._alert("Could not delete Voice Chat tunnel", msg)
+
+                GLib.idle_add(ui_done)
+
+            threading.Thread(target=run, daemon=True).start()
+
+        self._confirm_delete_tunnel("Voice Chat", confirmed_delete)
+
+    def _confirm_mod_warning(self, tunnel_name: str, message: str, link: str, on_confirm):
+        dialog = Adw.AlertDialog()
+        dialog.set_heading(f"Adding {tunnel_name} Tunnel")
+        dialog.set_body(message)
+        
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("get_mod", f"Get {tunnel_name} Mod")
+        dialog.add_response("continue", "Continue")
+        
+        dialog.set_response_appearance("continue", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("continue")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dialog, response):
+            if response == "continue":
+                on_confirm()
+            elif response == "get_mod":
+                _open_uri(link)
+                # Still show the warning or just let them continue? 
+                # Usually better to stay in the dialog or re-open.
+                # Let's just stay open by re-presenting if they click get mod? 
+                # Actually, Adw.AlertDialog closes on any response.
+                # Re-presenting might be annoying. Let's just let them continue after clicking link?
+                # The requirement says "and give a link for either geyser or simple voice chat".
+                # I'll just re-present it so they can still click "Continue".
+                dialog.present(self.get_root())
+
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
+
     def _on_start(self, *_args):
         if not self._server_manager or not self._server_info:
             return
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress:
+        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress:
             self._toast("A tunnel operation is already in progress")
             return
         if self._start_in_progress:

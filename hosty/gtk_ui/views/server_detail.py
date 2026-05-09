@@ -416,6 +416,11 @@ class ServerDetailView(Gtk.Box):
                 dialog.present(self.get_root())
                 return
                 
+            if self._current_server:
+                self._server_manager.playit_manager.configure_voicechat_mod(
+                    str(self._current_server.server_dir),
+                    self._current_server.id
+                )
             self._selected_process.start()
     
     def get_console_view(self) -> ConsoleView:

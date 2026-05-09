@@ -23,6 +23,11 @@ import requests
 from hosty.shared.core.events import EventEmitter
 from hosty.shared.utils.constants import DATA_DIR
 
+try:
+    import tomlkit
+except ImportError:
+    tomlkit = None
+
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 ENDPOINT_URL_RE = re.compile(r"(?:tcp|udp)://([A-Za-z0-9.-]+:\d{2,5})")
@@ -84,6 +89,7 @@ class PlayitManager(EventEmitter):
             self._cost = int(tunnel_data.get("port_count", 1) or 1)
 
             self.id = str(tunnel_data.get("id", ""))
+            self.name = str(tunnel_data.get("name", ""))
             self.type = tunnel_data.get("tunnel_type") or "both"
             self.protocol = tunnel_data.get("port_type") or "tcp"
             self.status = str((tunnel_data.get("alloc") or {}).get("status", "pending"))
@@ -771,6 +777,26 @@ class PlayitManager(EventEmitter):
 
         return tunnel not in self.tunnels.get(tunnel.protocol, [])
 
+    def _update_tunnel_local_port(self, tunnel_id: str, local_port: int) -> bool:
+        """Update the local bind port for an existing tunnel."""
+        try:
+            # We must provide the full origin data for update
+            payload = {
+                "tunnel_id": tunnel_id,
+                "origin": {
+                    "type": "agent",
+                    "data": {
+                        "agent_id": self._agent_id,
+                        "local_ip": "127.0.0.1",
+                        "local_port": int(local_port),
+                    }
+                }
+            }
+            data = self._request("tunnels/update", json=payload)
+            return data.get("status") == "success"
+        except Exception:
+            return False
+
     def get_tunnel(self, port: int, protocol: str = "tcp", ensure: bool = False, label: str = "") -> Tunnel | None:
         self._retrieve_tunnels()
 
@@ -993,12 +1019,12 @@ class PlayitManager(EventEmitter):
 
         return True, ""
 
-    def _resolve_tunnel_port(self, server_dir: str, protocol: str, bedrock_port: int = 19132) -> int:
+    def _resolve_tunnel_port(self, server_dir: str, protocol: str, bedrock_port: int = 19132, voicechat_port: int = 24454) -> int:
         if protocol == "tcp":
             return self._read_server_port(server_dir)
 
         try:
-            port = int(bedrock_port)
+            port = int(voicechat_port if voicechat_port != 24454 else bedrock_port)
         except Exception:
             return 19132
         if 1024 <= port <= 65535:
@@ -1021,13 +1047,25 @@ class PlayitManager(EventEmitter):
         secret: str = "",
         auto_install: bool = False,
         bedrock_port: int = 19132,
+        voicechat_port: int = 24454,
+        tunnel_kind: str = "",
     ) -> tuple[bool, str, str]:
         ok, msg = self._ensure_api_ready(secret=secret, auto_install=auto_install)
         if not ok:
             return False, msg, ""
 
-        port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
-        tunnel_label = server_id if protocol == "tcp" else f"{server_id}-bedrock"
+        if tunnel_kind == "voicechat":
+            port = voicechat_port if 1024 <= voicechat_port <= 65535 else 24454
+            tunnel_label = f"{server_id}-voicechat"
+            display_name = "Voice Chat"
+        elif tunnel_kind == "bedrock":
+            port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+            tunnel_label = f"{server_id}-bedrock"
+            display_name = "Bedrock"
+        else:
+            port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+            tunnel_label = server_id if protocol == "tcp" else f"{server_id}-bedrock"
+            display_name = "Java" if protocol == "tcp" else "Bedrock"
 
         try:
             tunnel = self.get_tunnel(
@@ -1043,10 +1081,9 @@ class PlayitManager(EventEmitter):
             return False, f"failed to allocate a {protocol.upper()} playit tunnel", ""
 
         endpoint = str(tunnel.hostname or "").strip()
-        tunnel_name = "Java" if protocol == "tcp" else "Bedrock"
         if endpoint:
-            return True, f"{tunnel_name} tunnel ready: {endpoint}", endpoint
-        return True, f"{tunnel_name} tunnel created on {protocol.upper()} port {port}", ""
+            return True, f"{display_name} tunnel ready: {endpoint}", endpoint
+        return True, f"{display_name} tunnel created on {protocol.upper()} port {port}", ""
 
     def _regenerate_tunnel_for_protocol(
         self,
@@ -1056,12 +1093,20 @@ class PlayitManager(EventEmitter):
         secret: str = "",
         auto_install: bool = False,
         bedrock_port: int = 19132,
+        voicechat_port: int = 24454,
+        tunnel_kind: str = "",
     ) -> tuple[bool, str, str]:
         ok, msg = self._ensure_api_ready(secret=secret, auto_install=auto_install)
         if not ok:
             return False, msg, ""
 
-        port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+        if tunnel_kind == "voicechat":
+            port = voicechat_port if 1024 <= voicechat_port <= 65535 else 24454
+            display_name = "Voice Chat"
+        else:
+            port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+            display_name = "Java" if protocol == "tcp" else "Bedrock"
+
         candidates = self._list_tunnels_for_port(port, protocol)
 
         deleted_any = False
@@ -1076,15 +1121,16 @@ class PlayitManager(EventEmitter):
             secret=secret,
             auto_install=auto_install,
             bedrock_port=bedrock_port,
+            voicechat_port=voicechat_port,
+            tunnel_kind=tunnel_kind,
         )
         if not ok:
             return False, msg, ""
 
-        tunnel_name = "Java" if protocol == "tcp" else "Bedrock"
         if deleted_any and endpoint:
-            return True, f"{tunnel_name} tunnel domain regenerated: {endpoint}", endpoint
+            return True, f"{display_name} tunnel domain regenerated: {endpoint}", endpoint
         if deleted_any:
-            return True, f"{tunnel_name} tunnel domain regenerated", endpoint
+            return True, f"{display_name} tunnel domain regenerated", endpoint
         return True, msg, endpoint
 
     def _delete_tunnel_for_protocol(
@@ -1094,16 +1140,23 @@ class PlayitManager(EventEmitter):
         secret: str = "",
         auto_install: bool = False,
         bedrock_port: int = 19132,
+        voicechat_port: int = 24454,
+        tunnel_kind: str = "",
     ) -> tuple[bool, str]:
         ok, msg = self._ensure_api_ready(secret=secret, auto_install=auto_install)
         if not ok:
             return False, msg
 
-        port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+        if tunnel_kind == "voicechat":
+            port = voicechat_port if 1024 <= voicechat_port <= 65535 else 24454
+            display_name = "Voice Chat"
+        else:
+            port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
+            display_name = "Java" if protocol == "tcp" else "Bedrock"
+
         candidates = self._list_tunnels_for_port(port, protocol)
         if not candidates:
-            tunnel_name = "Java" if protocol == "tcp" else "Bedrock"
-            return False, f"No {tunnel_name.lower()} tunnel found"
+            return False, f"No {display_name.lower()} tunnel found"
 
         deleted_any = False
         deleted_hostnames: list[str] = []
@@ -1117,8 +1170,7 @@ class PlayitManager(EventEmitter):
                     deleted_ids.add(str(tunnel.id))
 
         if not deleted_any:
-            tunnel_name = "Java" if protocol == "tcp" else "Bedrock"
-            return False, f"Failed to delete {tunnel_name.lower()} tunnel"
+            return False, f"Failed to delete {display_name.lower()} tunnel"
 
         if self._active_tunnel_id and self._active_tunnel_id in deleted_ids:
             self._active_tunnel_id = None
@@ -1128,8 +1180,7 @@ class PlayitManager(EventEmitter):
             self._public_endpoint = ""
             self._emit_endpoint_changed()
 
-        tunnel_name = "Java" if protocol == "tcp" else "Bedrock"
-        return True, f"{tunnel_name} tunnel deleted"
+        return True, f"{display_name} tunnel deleted"
 
     def add_java_tunnel(
         self,
@@ -1189,6 +1240,7 @@ class PlayitManager(EventEmitter):
             secret=secret,
             auto_install=auto_install,
             bedrock_port=bedrock_port,
+            tunnel_kind="bedrock",
         )
 
     def regenerate_bedrock_tunnel(
@@ -1206,6 +1258,7 @@ class PlayitManager(EventEmitter):
             secret=secret,
             auto_install=auto_install,
             bedrock_port=bedrock_port,
+            tunnel_kind="bedrock",
         )
 
     def delete_bedrock_tunnel(
@@ -1221,7 +1274,128 @@ class PlayitManager(EventEmitter):
             secret=secret,
             auto_install=auto_install,
             bedrock_port=bedrock_port,
+            tunnel_kind="bedrock",
         )
+
+    def add_voicechat_tunnel(
+        self,
+        server_id: str,
+        server_dir: str,
+        secret: str = "",
+        auto_install: bool = False,
+        voicechat_port: int = 24454,
+    ) -> tuple[bool, str, str]:
+        return self._add_tunnel_for_protocol(
+            server_id,
+            server_dir,
+            "udp",
+            secret=secret,
+            auto_install=auto_install,
+            voicechat_port=voicechat_port,
+            tunnel_kind="voicechat",
+        )
+
+    def regenerate_voicechat_tunnel(
+        self,
+        server_id: str,
+        server_dir: str,
+        secret: str = "",
+        auto_install: bool = False,
+        voicechat_port: int = 24454,
+    ) -> tuple[bool, str, str]:
+        return self._regenerate_tunnel_for_protocol(
+            server_id,
+            server_dir,
+            "udp",
+            secret=secret,
+            auto_install=auto_install,
+            voicechat_port=voicechat_port,
+            tunnel_kind="voicechat",
+        )
+
+    def delete_voicechat_tunnel(
+        self,
+        server_dir: str,
+        secret: str = "",
+        auto_install: bool = False,
+        voicechat_port: int = 24454,
+    ) -> tuple[bool, str]:
+        return self._delete_tunnel_for_protocol(
+            server_dir,
+            "udp",
+            secret=secret,
+            auto_install=auto_install,
+            voicechat_port=voicechat_port,
+            tunnel_kind="voicechat",
+        )
+
+    def configure_voicechat_mod(self, server_dir: str, server_id: str) -> bool:
+        """Auto-configure Simple Voice Chat mod to use the playit tunnel.
+
+        1) Extract the assigned UDP address and port from the local Playit agent's status/API.
+        2) Use tomlkit to open config/voicechat/voicechat-server.toml.
+        3) Overwrite port, voice_host, and bind_address.
+        4) Save the TOML file safely.
+        """
+        if tomlkit is None:
+            # Fallback to the old properties method if tomlkit is missing
+            # but the user specifically asked for TOML, so we should probably fail or log.
+            return False
+
+        # 1) Extract info
+        self._retrieve_tunnels()
+        voice_tunnel = None
+        # The label used in _add_tunnel_for_protocol
+        label_prefix = f"hosty-{re.sub(r'[^a-zA-Z0-9-]', '-', server_id.lower())}-voicechat"
+        
+        for tunnel in self.tunnels.get("udp", []):
+            if tunnel.name.startswith(label_prefix):
+                voice_tunnel = tunnel
+                break
+        
+        if not voice_tunnel or not voice_tunnel.domain or not voice_tunnel.remote_port:
+            return False
+
+        domain = str(voice_tunnel.domain)
+        remote_port = int(voice_tunnel.remote_port)
+
+        # Update Playit to forward to the same port locally so the mod can bind to it
+        if voice_tunnel.port != remote_port:
+            if self._update_tunnel_local_port(voice_tunnel.id, remote_port):
+                voice_tunnel.port = remote_port
+
+        # 2) Open TOML
+        config_dir = Path(server_dir) / "config" / "voicechat"
+        config_file = config_dir / "voicechat-server.toml"
+        
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            if config_file.exists():
+                content = config_file.read_text(encoding="utf-8")
+                doc = tomlkit.parse(content)
+            else:
+                doc = tomlkit.document()
+        except Exception:
+            return False
+
+        # 3) Overwrite keys
+        # Simple Voice Chat TOML structure usually has these at root or in [general]
+        # We'll set them at root or where they exist.
+        if "general" in doc and isinstance(doc["general"], dict):
+            target = doc["general"]
+        else:
+            target = doc
+
+        target["port"] = remote_port
+        target["voice_host"] = domain
+        target["bind_address"] = "0.0.0.0"
+
+        # 4) Save
+        try:
+            config_file.write_text(tomlkit.dumps(doc), encoding="utf-8")
+            return True
+        except Exception:
+            return False
 
     def stop(self) -> tuple[bool, str]:
         if not self.is_running:

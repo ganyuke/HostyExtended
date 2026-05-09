@@ -15,6 +15,7 @@ DEFAULT_PLAYIT_CONFIG = {
     "auto_install": True,
     "java_endpoint": "",
     "bedrock_endpoint": "",
+    "voicechat_endpoint": "",
 }
 
 
@@ -46,6 +47,7 @@ def load_playit_config(server_dir: str | Path) -> dict:
     cfg["auto_install"] = bool(cfg.get("auto_install", True))
     cfg["java_endpoint"] = str(cfg.get("java_endpoint", "")).strip()
     cfg["bedrock_endpoint"] = str(cfg.get("bedrock_endpoint", "")).strip()
+    cfg["voicechat_endpoint"] = str(cfg.get("voicechat_endpoint", "")).strip()
     return cfg
 
 
@@ -60,6 +62,7 @@ def save_playit_config(server_dir: str | Path, config: dict) -> bool:
     payload["auto_install"] = bool(payload.get("auto_install", True))
     payload["java_endpoint"] = str(payload.get("java_endpoint", "")).strip()
     payload["bedrock_endpoint"] = str(payload.get("bedrock_endpoint", "")).strip()
+    payload["voicechat_endpoint"] = str(payload.get("voicechat_endpoint", "")).strip()
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

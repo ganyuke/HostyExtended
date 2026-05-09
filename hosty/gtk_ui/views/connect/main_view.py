@@ -46,6 +46,7 @@ class ConnectView(Gtk.Box, LocalIpMixin, PlayersMixin, PlayitMixin):
         self._start_in_progress = False
         self._java_tunnel_in_progress = False
         self._bedrock_in_progress = False
+        self._voicechat_in_progress = False
         self._local_ip_rows: list[Adw.ActionRow] = []
         self._local_ip_value = "Not available"
         self._whitelist_status_rows: list[Adw.ActionRow] = []
@@ -156,6 +157,23 @@ class ConnectView(Gtk.Box, LocalIpMixin, PlayersMixin, PlayitMixin):
         self._bedrock_tunnel_action_btn.connect("clicked", self._on_manage_bedrock_tunnel)
         self._bedrock_domain_row.add_suffix(self._bedrock_tunnel_action_btn)
         group.add(self._bedrock_domain_row)
+
+        self._voicechat_domain_row = Adw.ActionRow(title="Voice Chat tunnel domain", subtitle="Not available")
+        self._voicechat_domain_row.set_activatable(False)
+        self._voicechat_domain_row.connect("activated", self._on_voicechat_domain_row_activated)
+        self._copy_voicechat_domain_btn = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER)
+        self._copy_voicechat_domain_btn.add_css_class("flat")
+        self._copy_voicechat_domain_btn.set_tooltip_text("Copy voice chat tunnel domain")
+        self._copy_voicechat_domain_btn.set_sensitive(False)
+        self._copy_voicechat_domain_btn.set_visible(False)
+        self._copy_voicechat_domain_btn.connect("clicked", self._on_copy_voicechat_domain)
+        self._voicechat_domain_row.add_suffix(self._copy_voicechat_domain_btn)
+        self._voicechat_tunnel_action_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
+        self._voicechat_tunnel_action_btn.add_css_class("flat")
+        self._voicechat_tunnel_action_btn.set_tooltip_text("Add Voice Chat tunnel")
+        self._voicechat_tunnel_action_btn.connect("clicked", self._on_manage_voicechat_tunnel)
+        self._voicechat_domain_row.add_suffix(self._voicechat_tunnel_action_btn)
+        group.add(self._voicechat_domain_row)
 
         settings_row = Adw.ExpanderRow(
             title="Playit settings",
