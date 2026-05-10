@@ -35,6 +35,7 @@ class ModrinthHit:
 @dataclass
 class ModrinthVersion:
     version_id: str
+    project_id: str
     name: str
     version_number: str
     game_versions: list[str]
@@ -58,6 +59,7 @@ def _version_to_model(ver: dict[str, Any]) -> Optional[ModrinthVersion]:
         return None
     return ModrinthVersion(
         version_id=ver.get("id", ""),
+        project_id=ver.get("project_id", ""),
         name=ver.get("name", ""),
         version_number=ver.get("version_number", ""),
         game_versions=[str(v) for v in (ver.get("game_versions") or [])],
@@ -175,15 +177,20 @@ def search_mods(
     if qtext:
         base["query"] = qtext
     ptype = (project_type or "mod").strip().lower()
-    if ptype not in {"mod", "modpack"}:
+    if ptype not in {"mod", "modpack", "datapack"}:
         ptype = "mod"
 
-    facets_raw: list[list[str]] = [[f"project_type:{ptype}"], [f"categories:{loader}"]]
+    if ptype == "datapack":
+        # Datapacks are a first-class project_type on Modrinth — no loader facet needed.
+        facets_raw: list[list[str]] = [["project_type:datapack"]]
+    else:
+        facets_raw: list[list[str]] = [[f"project_type:{ptype}"], [f"categories:{loader}"]]
+
     if ptype == "modpack":
         facets_raw.append(["server_side:required", "server_side:optional", "server_side:unknown"])
     elif server_side_only and ptype == "mod":
         facets_raw.append(["server_side:required", "server_side:optional"])
-    if category:
+    if category and ptype != "datapack":
         facets_raw.append([f"categories:{category}"])
     if game_version:
         facets_raw.append([f"versions:{game_version}"])
@@ -215,6 +222,8 @@ def search_mods(
 
     hits: list[ModrinthHit] = []
     for h in raw_hits:
+        # When searching datapacks the API returns project_type "mod"; override it.
+        effective_ptype = "datapack" if ptype == "datapack" else str(h.get("project_type") or ptype)
         hits.append(
             ModrinthHit(
                 project_id=h["project_id"],
@@ -226,11 +235,23 @@ def search_mods(
                 downloads=int(h.get("downloads") or 0),
                 author=h.get("author", ""),
                 categories=[str(c) for c in (h.get("categories") or [])],
-                project_type=str(h.get("project_type") or ptype),
+                project_type=effective_ptype,
             )
         )
     total_hits = int(data.get("total_hits") or len(hits))
     return hits, total_hits
+
+
+def get_project(project_id: str) -> Optional[dict[str, Any]]:
+    """Fetch a single Modrinth project object by id or slug."""
+    url = f"{API}/project/{project_id}"
+    try:
+        data = _request_json(url)
+    except urllib.error.HTTPError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
 
 
 def get_project_versions(project_id: str) -> list[ModrinthVersion]:
