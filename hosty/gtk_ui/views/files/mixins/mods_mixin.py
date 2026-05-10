@@ -901,12 +901,21 @@ class ModsMixin:
             blocked = 0
             for project_id, meta in individual_state.items():
                 current_version = str((meta or {}).get("version_id", "")).strip()
+                # Get all versions and filter to only mods (have loaders)
+                all_versions = modrinth_client.get_project_versions(project_id)
+                mod_versions = [v for v in all_versions if v.loaders and len(v.loaders) > 0]
+                
+                # Find compatible mod version with fabric loader
                 latest = modrinth_client.find_compatible_version(
                     project_id,
                     mc_version,
                     loader="fabric",
                 )
                 if not latest:
+                    continue
+                
+                # Ensure the compatible version is actually a mod (has loaders)
+                if not latest.loaders or len(latest.loaders) == 0:
                     continue
                 
                 # Update metadata if missing (backfilling)
@@ -946,10 +955,12 @@ class ModsMixin:
             for project_id, meta in datapack_state.items():
                 current_version = str((meta or {}).get("version_id", "")).strip()
                 versions = modrinth_client.get_project_versions(project_id)
-                compatible = [v for v in versions if not mc_version or mc_version in (v.game_versions or [])]
+                # Filter to only datapack versions (no loaders)
+                datapack_versions = [v for v in versions if not v.loaders or len(v.loaders) == 0]
+                compatible = [v for v in datapack_versions if not mc_version or mc_version in (v.game_versions or [])]
                 if not compatible:
-                    # Fall back to any version
-                    compatible = versions
+                    # Fall back to any datapack version without MC version requirement
+                    compatible = datapack_versions
                 if not compatible:
                     continue
                 latest = compatible[0]
