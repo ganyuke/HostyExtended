@@ -35,6 +35,7 @@ class ModrinthHit:
 @dataclass
 class ModrinthVersion:
     version_id: str
+    project_id: str
     name: str
     version_number: str
     game_versions: list[str]
@@ -58,6 +59,7 @@ def _version_to_model(ver: dict[str, Any]) -> Optional[ModrinthVersion]:
         return None
     return ModrinthVersion(
         version_id=ver.get("id", ""),
+        project_id=ver.get("project_id", ""),
         name=ver.get("name", ""),
         version_number=ver.get("version_number", ""),
         game_versions=[str(v) for v in (ver.get("game_versions") or [])],
@@ -238,6 +240,18 @@ def search_mods(
         )
     total_hits = int(data.get("total_hits") or len(hits))
     return hits, total_hits
+
+
+def get_project(project_id: str) -> Optional[dict[str, Any]]:
+    """Fetch a single Modrinth project object by id or slug."""
+    url = f"{API}/project/{project_id}"
+    try:
+        data = _request_json(url)
+    except urllib.error.HTTPError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
 
 
 def get_project_versions(project_id: str) -> list[ModrinthVersion]:

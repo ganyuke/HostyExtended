@@ -501,7 +501,7 @@ class ModrinthMixin:
             install_btn.set_sensitive(False)
 
             if is_datapack:
-                def ui_ok_dp(fname: str):
+                def ui_ok_dp(fname: str, dep_count: int):
                     install_btn.set_label("Installed")
                     install_btn.set_sensitive(False)
                     self._record_datapack_install(
@@ -509,7 +509,10 @@ class ModrinthMixin:
                         hit.title,
                         chosen.version_id,
                         chosen.filename,
+                        version_number=chosen.version_number,
                     )
+                    if dep_count > 0:
+                        self._toast(f"Installed {dep_count} required dependencies")
                     self._toast(f"Installed datapack {fname}")
                     self._end_mod_operation(op_token)
                     self._rebuild_lists()
@@ -520,7 +523,7 @@ class ModrinthMixin:
                     self._end_mod_operation(op_token)
                     self._alert("Install failed", msg)
 
-                def install_dp_thread():
+                def install_dp_thread(deps_to_install: list):
                     try:
                         root = self._server_dir()
                         if not root:
@@ -529,13 +532,95 @@ class ModrinthMixin:
                         if not dp_dir:
                             raise RuntimeError("Could not determine datapacks folder.")
                         dp_dir.mkdir(parents=True, exist_ok=True)
+
+                        installed_dep_count = 0
+                        for dep in deps_to_install:
+                            dep_dest = dp_dir / dep.filename
+                            modrinth_client.download_to(dep.download_url, dep_dest)
+                            # Record dependency as an individual datapack install so it shows in UI and gets updates
+                            self._record_datapack_install(
+                                dep.project_id,
+                                dep.name or dep.filename,
+                                dep.version_id,
+                                dep.filename,
+                                version_number=dep.version_number,
+                            )
+                            installed_dep_count += 1
+
                         dest = dp_dir / chosen.filename
                         modrinth_client.download_to(chosen.download_url, dest)
-                        GLib.idle_add(lambda f=chosen.filename: ui_ok_dp(f))
+                        GLib.idle_add(lambda f=chosen.filename, c=installed_dep_count: ui_ok_dp(f, c))
                     except Exception as e:
                         GLib.idle_add(lambda m=str(e): ui_err_dp(m))
 
-                threading.Thread(target=install_dp_thread, daemon=True).start()
+                def prompt_dp_dependencies(deps_to_install: list):
+                    if not deps_to_install:
+                        threading.Thread(
+                            target=install_dp_thread,
+                            args=([],),
+                            daemon=True,
+                        ).start()
+                        return
+
+                    dep_names = [d.filename for d in deps_to_install]
+                    preview = "\n".join([f"- {n}" for n in dep_names[:6]])
+                    more = ""
+                    if len(dep_names) > 6:
+                        more = f"\n- and {len(dep_names) - 6} more"
+
+                    dialog = Adw.AlertDialog()
+                    dialog.set_heading("Install required dependencies?")
+                    dialog.set_body(
+                        "This datapack requires additional dependencies:\n\n"
+                        f"{preview}{more}\n\n"
+                        "Install them as well?"
+                    )
+                    dialog.add_response("cancel", "Cancel")
+                    dialog.add_response("install", "Install")
+                    dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+                    dialog.set_default_response("install")
+                    dialog.set_close_response("cancel")
+
+                    def on_response(_d, response):
+                        if response == "install":
+                            threading.Thread(
+                                target=install_dp_thread,
+                                args=(deps_to_install,),
+                                daemon=True,
+                            ).start()
+                        else:
+                            install_btn.set_label("Install datapack")
+                            install_btn.set_sensitive(True)
+                            self._end_mod_operation(op_token)
+
+                    dialog.connect("response", on_response)
+                    dialog.present(self.get_root())
+
+                def resolve_and_prompt_dp():
+                    try:
+                        # For datapacks, we use the "datapack" loader for dependency resolution
+                        deps = modrinth_client.resolve_required_dependencies(
+                            chosen.version_id,
+                            mc_version,
+                            loader="datapack",
+                        )
+                        # Filter out already installed datapacks
+                        dp_state = self._read_datapack_state().get("datapacks", {})
+                        installed_ids = set(dp_state.keys())
+                        
+                        deps_to_install = []
+                        for dep in deps:
+                            if dep.project_id in installed_ids:
+                                continue
+                            if dep.project_id == hit.project_id:
+                                continue
+                            deps_to_install.append(dep)
+
+                        GLib.idle_add(lambda d=deps_to_install: prompt_dp_dependencies(d))
+                    except Exception as e:
+                        GLib.idle_add(lambda m=str(e): ui_err_dp(m))
+
+                threading.Thread(target=resolve_and_prompt_dp, daemon=True).start()
                 return
 
             if is_modpack:
@@ -612,6 +697,7 @@ class ModrinthMixin:
                     hit.title,
                     chosen.version_id,
                     chosen.filename,
+                    version_number=chosen.version_number,
                 )
                 if dep_count > 0:
                     self._toast(f"Installed {dep_count} required dependencies")

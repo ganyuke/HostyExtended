@@ -115,12 +115,14 @@ class ModsMixin:
                     continue
                 title = str(item.get("title", "")).strip()
                 version_id = str(item.get("version_id", "")).strip()
+                version_number = str(item.get("version_number", "")).strip()
                 filename = str(item.get("filename", "")).strip()
                 if not filename:
                     continue
                 cleaned[pid] = {
                     "title": title,
                     "version_id": version_id,
+                    "version_number": version_number,
                     "filename": filename,
                 }
             return {"datapacks": cleaned}
@@ -145,6 +147,7 @@ class ModsMixin:
         title: str,
         version_id: str,
         filename: str,
+        version_number: str = "",
     ) -> None:
         pid = str(project_id).strip()
         if not pid:
@@ -154,6 +157,7 @@ class ModsMixin:
         dps[pid] = {
             "title": str(title or "").strip(),
             "version_id": str(version_id or "").strip(),
+            "version_number": str(version_number or "").strip(),
             "filename": str(filename or "").strip(),
         }
         self._write_datapack_state(state)
@@ -169,6 +173,7 @@ class ModsMixin:
         title = str(meta.get("title", "")).strip() or project_id
         filename = str(meta.get("filename", "")).strip()
         version_id = str(meta.get("version_id", "")).strip()
+        version_number = str(meta.get("version_number", "")).strip()
 
         row = Adw.ActionRow(title=title)
         subtitle_bits = []
@@ -178,7 +183,9 @@ class ModsMixin:
                 jar = dp_dir / filename
                 if jar.exists():
                     subtitle_bits.append(_format_size(jar.stat().st_size))
-        if version_id:
+        if version_number:
+            subtitle_bits.append(f"version {version_number}")
+        elif version_id:
             subtitle_bits.append(f"version {version_id[:8]}")
         row.set_subtitle(" · ".join(subtitle_bits) if subtitle_bits else "")
         row.set_activatable(False)
@@ -371,6 +378,7 @@ class ModsMixin:
 
                 title = str(item.get("title", "")).strip()
                 version_id = str(item.get("version_id", "")).strip()
+                version_number = str(item.get("version_number", "")).strip()
                 filename = str(item.get("filename", "")).strip()
                 if not filename:
                     continue
@@ -378,6 +386,7 @@ class ModsMixin:
                 cleaned[pid] = {
                     "title": title,
                     "version_id": version_id,
+                    "version_number": version_number,
                     "filename": filename,
                 }
 
@@ -404,6 +413,7 @@ class ModsMixin:
         title: str,
         version_id: str,
         filename: str,
+        version_number: str = "",
     ) -> None:
         pid = str(project_id).strip()
         if not pid:
@@ -414,6 +424,7 @@ class ModsMixin:
         mods[pid] = {
             "title": str(title or "").strip(),
             "version_id": str(version_id or "").strip(),
+            "version_number": str(version_number or "").strip(),
             "filename": str(filename or "").strip(),
         }
         self._write_individual_mod_state(state)
@@ -666,13 +677,45 @@ class ModsMixin:
         return [p for p in parents if p in installed]
 
     def _make_mod_row(self, jar: Path) -> Adw.ActionRow:
-        row = Adw.ActionRow(title=jar.name)
-        subtitle = _format_size(jar.stat().st_size)
+        # Try to find metadata for this jar
+        filename_lower = jar.name.lower()
+        mod_state = self._read_individual_mod_state().get("mods", {})
+        
+        project_id = None
+        version_id = None
+        version_number = None
+        mod_title = None
+        for pid, meta in mod_state.items():
+            if str(meta.get("filename", "")).lower() == filename_lower:
+                project_id = pid
+                version_id = meta.get("version_id")
+                version_number = meta.get("version_number")
+                mod_title = meta.get("title")
+                break
+
+        row = Adw.ActionRow(title=mod_title or jar.name)
+        subtitle_bits = [_format_size(jar.stat().st_size)]
+        
         dependents = self._dependency_dependents(jar.name)
         if dependents:
-            subtitle = f"{subtitle} · Dependency"
-        row.set_subtitle(subtitle)
+            subtitle_bits.append("Dependency")
+            
+        if version_number:
+            subtitle_bits.append(f"version {version_number}")
+        elif version_id:
+            subtitle_bits.append(f"version {version_id[:8]}")
+
+        row.set_subtitle(" · ".join(subtitle_bits))
         row.set_activatable(False)
+        
+        if project_id:
+            open_btn = self._icon_button(
+                "web-browser-symbolic",
+                "Open mod page",
+                lambda *_p, pid=project_id: _open_uri(f"https://modrinth.com/mod/{pid}"),
+            )
+            row.add_suffix(open_btn)
+
         del_btn = self._icon_button(
             "user-trash-symbolic",
             "Delete mod",
@@ -834,6 +877,7 @@ class ModsMixin:
             individual_state = self._read_individual_mod_state().get("mods", {})
             datapack_state = self._read_datapack_state().get("datapacks", {})
 
+            refresh_needed = False
             modpack_updates = []
             for project_id, entry in modpack_entries.items():
                 current_version = str(entry.get("version_id", "")).strip()
@@ -852,6 +896,7 @@ class ModsMixin:
                 if newer:
                     modpack_updates.append((project_id, entry, newer))
 
+            # Check standalone updates
             standalone_updates = []
             blocked = 0
             for project_id, meta in individual_state.items():
@@ -863,6 +908,24 @@ class ModsMixin:
                 )
                 if not latest:
                     continue
+                
+                # Update metadata if missing (backfilling)
+                if not (meta or {}).get("version_number") or not (meta or {}).get("title"):
+                    title_to_record = (meta or {}).get("title")
+                    if not title_to_record:
+                        p_data = modrinth_client.get_project(project_id)
+                        if p_data:
+                            title_to_record = p_data.get("title")
+                    
+                    self._record_individual_mod_install(
+                        project_id,
+                        title_to_record or project_id,
+                        current_version,
+                        (meta or {}).get("filename"),
+                        version_number=(meta or {}).get("version_number") or latest.version_number if latest.version_id == current_version else (meta or {}).get("version_number"),
+                    )
+                    refresh_needed = True
+
                 if str(latest.version_id).strip() == current_version:
                     continue
 
@@ -890,9 +953,30 @@ class ModsMixin:
                 if not compatible:
                     continue
                 latest = compatible[0]
+
+                # Update metadata if missing (backfilling)
+                if not (meta or {}).get("version_number") or not (meta or {}).get("title"):
+                    title_to_record = (meta or {}).get("title")
+                    if not title_to_record:
+                        p_data = modrinth_client.get_project(project_id)
+                        if p_data:
+                            title_to_record = p_data.get("title")
+                    
+                    self._record_datapack_install(
+                        project_id,
+                        title_to_record or project_id,
+                        current_version,
+                        (meta or {}).get("filename"),
+                        version_number=(meta or {}).get("version_number") or latest.version_number if latest.version_id == current_version else (meta or {}).get("version_number"),
+                    )
+                    refresh_needed = True
+
                 if str(latest.version_id).strip() == current_version:
                     continue
                 datapack_updates.append((project_id, meta, latest))
+
+            if refresh_needed:
+                GLib.idle_add(self._rebuild_lists)
 
             def show_result():
                 total_updates = len(modpack_updates) + len(standalone_updates) + len(datapack_updates)
@@ -1101,6 +1185,7 @@ class ModsMixin:
                     mod_title,
                     latest.version_id,
                     latest.filename,
+                    version_number=latest.version_number,
                 )
                 self._record_dependency_installs(latest.filename, deps_to_install)
                 applied += 1
@@ -1134,6 +1219,7 @@ class ModsMixin:
                     dp_title,
                     latest.version_id,
                     latest.filename,
+                    version_number=latest.version_number,
                 )
                 applied += 1
             except Exception:
