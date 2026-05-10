@@ -55,7 +55,7 @@ class HostyWindow(Adw.ApplicationWindow):
         self._content_stack.add_named(self._welcome_view, "welcome")
         
         # Server detail view
-        self._detail_view = ServerDetailView(server_manager)
+        self._detail_view = ServerDetailView(server_manager, toast_overlay=self._toast_overlay)
         self._content_stack.add_named(self._detail_view, "detail")
         
         self._split_view.set_content(self._content_stack)

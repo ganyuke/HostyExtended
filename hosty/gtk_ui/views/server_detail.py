@@ -25,9 +25,10 @@ class ServerDetailView(Gtk.Box):
     Uses Adw.ToolbarView with ViewSwitcherTitle for proper Adwaita integration.
     """
     
-    def __init__(self, server_manager: ServerManager):
+    def __init__(self, server_manager: ServerManager, toast_overlay=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._server_manager = server_manager
+        self._toast_overlay = toast_overlay
         self._current_server: Optional[ServerInfo] = None
         self._selected_process: Optional[ServerProcess] = None
         self._console_attached_process: Optional[ServerProcess] = None
@@ -149,7 +150,7 @@ class ServerDetailView(Gtk.Box):
 
     def _ensure_props_view(self) -> PropertiesView:
         if self._props_view is None:
-            self._props_view = PropertiesView()
+            self._props_view = PropertiesView(toast_overlay=self._toast_overlay)
             self._tab_hosts["properties"].append(self._props_view)
             if self._current_server:
                 config = self._server_manager.get_config(self._current_server.id)

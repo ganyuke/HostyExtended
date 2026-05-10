@@ -29,14 +29,17 @@ DIFFICULTY_MODES = [*DIFFICULTIES, "hardcore"]
 class PropertiesView(Gtk.Box):
     """GUI editor for server.properties using Adwaita preference widgets."""
     
-    def __init__(self):
+    def __init__(self, toast_overlay=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_hexpand(True)
+        self.set_vexpand(True)
         self._config: Optional[ConfigManager] = None
         self._server_manager: Optional[ServerManager] = None
         self._server_info: Optional[ServerInfo] = None
         self._widgets: dict = {}
         self._ram_row: Optional[Adw.SpinRow] = None
         self._suppress_changes = False
+        self._app_toast_overlay = toast_overlay
         
         # Restart banner
         self._banner = Adw.Banner()
@@ -48,6 +51,7 @@ class PropertiesView(Gtk.Box):
         
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         
         page = Adw.PreferencesPage()
@@ -204,12 +208,26 @@ class PropertiesView(Gtk.Box):
             # Show toast/banner
             self._banner.set_title(err)
             self._banner.set_revealed(True)
+    
+    def _on_entry_apply(self, row, title):
+        """Handle entry row apply/confirmation."""
+        self._show_toast("Property updated")
+    
+    def _show_toast(self, message: str, timeout: int = 2):
+        """Show a toast notification."""
+        if not self._app_toast_overlay:
+            return
+        toast = Adw.Toast(title=message)
+        toast.set_timeout(timeout)
+        self._app_toast_overlay.add_toast(toast)
             
     def _add_entry_row(self, group, title, key, default):
         """Add an Adw.EntryRow to a group."""
         row = Adw.EntryRow(title=title)
+        row.set_show_apply_button(True)
         row.set_text(default)
         row._prop_key = key
+        row.connect("apply", self._on_entry_apply, title)
         group.add(row)
         return row
     
