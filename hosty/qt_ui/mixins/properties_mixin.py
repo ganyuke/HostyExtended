@@ -4,27 +4,32 @@ Properties mixin — GUI editor for server.properties with auto-save.
 
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
     QScrollArea,
     QSpinBox,
     QProgressBar,
+    QStackedWidget,
 )
 
 from ..components import SmoothScrollArea
 from hosty.shared.backend.config_manager import ConfigManager
 from hosty.shared.backend.server_manager import ServerInfo, ServerManager
+from hosty.shared.core.events import dispatch_on_main_thread
 from hosty.shared.utils.constants import (
     DEFAULT_RAM_MB,
     DIFFICULTIES,
@@ -103,8 +108,17 @@ class PropertiesMixin:
         
         version_lay.addStretch()
         
-        self._change_version_btn = QPushButton("Change...")
+        self._change_version_btn = QPushButton()
+        try:
+            from ..theme import get_material_icon, get_colors, is_system_dark
+            icon_color = get_colors(is_system_dark()).get("text_secondary", "#C4B5A3")
+            self._change_version_btn.setIcon(get_material_icon("upgrade", icon_color, 20))
+        except Exception:
+            self._change_version_btn.setText("↑")
+        self._change_version_btn.setToolTip("Upgrade server version")
+        self._change_version_btn.setFixedSize(36, 36)
         self._change_version_btn.setProperty("class", "flat")
+        self._change_version_btn.setEnabled(False)
         self._change_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._change_version_btn.clicked.connect(self._on_change_version_clicked)
         version_lay.addWidget(self._change_version_btn)
@@ -251,11 +265,304 @@ class PropertiesMixin:
             
         config.load()
         self._populate_properties()
+        self._refresh_upgrade_button()
         self._props_banner.setVisible(False)
 
+    def _refresh_upgrade_button(self) -> None:
+        if not hasattr(self, "_change_version_btn") or not self._server_manager or not self._prop_server_info:
+            return
+        self._change_version_btn.setEnabled(False)
+        self._change_version_btn.setToolTip("Checking for newer Minecraft versions...")
+
+        def worker():
+            versions = self._server_manager.download_manager.fetch_game_versions()
+            current = self._prop_server_info.mc_version if self._prop_server_info else ""
+            has_upgrade = any(ServerManager.is_version_after(v, current) for v in versions)
+
+            def done():
+                self._change_version_btn.setEnabled(has_upgrade)
+                self._change_version_btn.setToolTip(
+                    "Upgrade server version" if has_upgrade else "No newer Minecraft versions available"
+                )
+
+            dispatch_on_main_thread(done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _on_change_version_clicked(self) -> None:
-        """Placeholder for version change flow."""
-        self._show_toast("Version change dialog not fully implemented here yet.")
+        if not self._server_manager or not self._prop_server_info:
+            self._show_toast("Select a server first.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change Version")
+        dialog.setMinimumSize(560, 520)
+        root = QVBoxLayout(dialog)
+        root.setSpacing(12)
+        root.setContentsMargins(20, 16, 20, 20)
+
+        header = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        primary_btn = QPushButton("Next")
+        primary_btn.setProperty("class", "accent")
+        primary_btn.setEnabled(False)
+        header.addWidget(cancel_btn)
+        header.addStretch()
+        header.addWidget(primary_btn)
+        root.addLayout(header)
+
+        stack = QStackedWidget(dialog)
+        root.addWidget(stack, 1)
+
+        runtime_page = QWidget(dialog)
+        runtime_layout = QVBoxLayout(runtime_page)
+        runtime_layout.setSpacing(12)
+        runtime_layout.setContentsMargins(0, 0, 0, 0)
+
+        form = QGroupBox("Runtime")
+        form_layout = QVBoxLayout(form)
+        mc_combo = QComboBox()
+        loader_combo = QComboBox()
+        mc_combo.addItem("Loading...")
+        loader_combo.addItem("Loading...")
+        mc_combo.setEnabled(False)
+        loader_combo.setEnabled(False)
+
+        mc_row = QHBoxLayout()
+        mc_row.addWidget(QLabel("Minecraft version"))
+        mc_row.addWidget(mc_combo, 1)
+        form_layout.addLayout(mc_row)
+
+        loader_row = QHBoxLayout()
+        loader_row.addWidget(QLabel("Fabric loader"))
+        loader_row.addWidget(loader_combo, 1)
+        form_layout.addLayout(loader_row)
+        runtime_layout.addWidget(form)
+        runtime_layout.addStretch()
+        stack.addWidget(runtime_page)
+
+        mods_page = QWidget(dialog)
+        mods_layout = QVBoxLayout(mods_page)
+        mods_layout.setSpacing(12)
+        mods_layout.setContentsMargins(0, 0, 0, 0)
+        info = QLabel("Compatible items will be updated. Incompatible items will be moved to mods_incompatible/ or datapacks_incompatible/ so the server can start.")
+        info.setWordWrap(True)
+        info.setProperty("class", "dim")
+        mods_layout.addWidget(info)
+        review_group = QGroupBox("Mod Compatibility")
+        review_layout = QVBoxLayout(review_group)
+        review_layout.setSpacing(8)
+        mods_layout.addWidget(review_group, 1)
+        stack.addWidget(mods_page)
+
+        progress_page = QWidget(dialog)
+        progress_layout = QVBoxLayout(progress_page)
+        progress_layout.setSpacing(16)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_title = QLabel("Updating Server")
+        progress_title.setProperty("class", "header")
+        progress_layout.addWidget(progress_title)
+        progress_detail = QLabel("Preparing update...")
+        progress_detail.setProperty("class", "dim")
+        progress_detail.setWordWrap(True)
+        progress_layout.addWidget(progress_detail)
+        apply_progress = QProgressBar()
+        apply_progress.setRange(0, 100)
+        apply_progress.setValue(0)
+        progress_layout.addWidget(apply_progress)
+        progress_layout.addStretch()
+        stack.addWidget(progress_page)
+
+        game_versions: list[str] = []
+        loader_versions: list[str] = []
+        selected_mc = {"value": ""}
+        selected_loader = {"value": ""}
+        compatibility_plan: dict = {}
+
+        def validate():
+            primary_btn.setEnabled(bool(game_versions) and bool(loader_versions))
+
+        def on_cancel():
+            if stack.currentIndex() == 1:
+                stack.setCurrentIndex(0)
+                cancel_btn.setText("Cancel")
+                primary_btn.setText("Next")
+                primary_btn.setEnabled(bool(game_versions) and bool(loader_versions))
+                return
+            if stack.currentIndex() == 2:
+                return
+            dialog.reject()
+
+        cancel_btn.clicked.connect(on_cancel)
+
+        def clear_review() -> None:
+            while review_layout.count():
+                item = review_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+        def add_group(title: str, items: list[dict], fallback: str) -> None:
+            if not items:
+                lbl = QLabel(fallback)
+                lbl.setProperty("class", "dim")
+                review_layout.addWidget(lbl)
+                return
+            header_lbl = QLabel(f"{title} ({len(items)})")
+            header_lbl.setProperty("class", "title")
+            review_layout.addWidget(header_lbl)
+            for item in items:
+                name = str(item.get("title") or item.get("filename") or "Unknown")
+                version = str(item.get("version_number") or item.get("version_id") or "").strip()
+                filename = str(item.get("filename") or item.get("current_filename") or "").strip()
+                row = QLabel(" · ".join([x for x in (name, version, filename) if x]))
+                row.setProperty("class", "dim")
+                row.setWordWrap(True)
+                review_layout.addWidget(row)
+
+        def load_versions():
+            games = self._server_manager.download_manager.fetch_game_versions()
+            loaders = self._server_manager.download_manager.fetch_loader_versions()
+
+            def done():
+                current_mc = self._prop_server_info.mc_version if self._prop_server_info else ""
+                current_loader = self._prop_server_info.loader_version if self._prop_server_info else ""
+                next_games = [
+                    v for v in games
+                    if ServerManager.is_version_after(v, current_mc)
+                ]
+                next_loaders = [
+                    v for v in loaders
+                    if not current_loader or ServerManager.is_version_at_least(v, current_loader)
+                ]
+                game_versions.clear()
+                game_versions.extend(next_games)
+                loader_versions.clear()
+                loader_versions.extend(next_loaders)
+                mc_combo.clear()
+                loader_combo.clear()
+                mc_combo.addItems(game_versions or ["No versions found"])
+                loader_combo.addItems(loader_versions or ["No loaders found"])
+                mc_combo.setEnabled(bool(game_versions))
+                loader_combo.setEnabled(bool(loader_versions))
+                if current_loader in loader_versions:
+                    loader_combo.setCurrentIndex(loader_versions.index(current_loader))
+                validate()
+
+            dispatch_on_main_thread(done)
+
+        def show_review():
+            if not game_versions or not loader_versions or not self._prop_server_info:
+                return
+            selected_mc["value"] = game_versions[mc_combo.currentIndex()]
+            selected_loader["value"] = loader_versions[loader_combo.currentIndex()]
+            primary_btn.setEnabled(False)
+            primary_btn.setText("Update")
+            cancel_btn.setText("Back")
+            clear_review()
+            stack.setCurrentIndex(1)
+            loading = QLabel("Checking installed mods and datapacks...")
+            loading.setProperty("class", "dim")
+            review_layout.addWidget(loading)
+            scan_progress = QProgressBar()
+            scan_progress.setRange(0, 0)
+            review_layout.addWidget(scan_progress)
+
+            def worker():
+                plan = self._server_manager.scan_update_compatibility(
+                    self._prop_server_info.id,
+                    selected_mc["value"],
+                )
+
+                def done():
+                    compatibility_plan.clear()
+                    compatibility_plan.update(plan)
+                    clear_review()
+                    compatible = plan.get("compatible", {})
+                    incompatible = plan.get("incompatible", {})
+                    unknown = plan.get("unknown", {})
+                    add_group(
+                        "Compatible and will be updated",
+                        [*compatible.get("modpacks", []), *compatible.get("mods", []), *compatible.get("datapacks", [])],
+                        "No tracked compatible items found",
+                    )
+                    add_group(
+                        "Incompatible and will be disabled",
+                        [*incompatible.get("modpacks", []), *incompatible.get("mods", []), *incompatible.get("datapacks", [])],
+                        "No incompatible items found",
+                    )
+                    unknown_items = [*unknown.get("modpacks", []), *unknown.get("mods", []), *unknown.get("datapacks", [])]
+                    if unknown_items:
+                        add_group("Could not check", unknown_items, "")
+                    stack.setCurrentIndex(1)
+                    primary_btn.setText("Update")
+                    primary_btn.setEnabled(True)
+
+                dispatch_on_main_thread(done)
+
+            import threading
+            threading.Thread(target=worker, daemon=True).start()
+
+        def run_update():
+            mc_version = selected_mc["value"]
+            loader_version = selected_loader["value"]
+            if not mc_version or not loader_version:
+                show_review()
+                return
+            primary_btn.setEnabled(False)
+            cancel_btn.setEnabled(False)
+            primary_btn.setText("Update")
+            stack.setCurrentIndex(2)
+            apply_progress.setValue(0)
+            progress_detail.setText("Preparing update...")
+
+            def progress_cb(frac, message):
+                def update_progress_ui():
+                    apply_progress.setValue(int(max(0.0, min(1.0, float(frac))) * 100))
+                    progress_detail.setText(str(message))
+                    primary_btn.setToolTip(str(message))
+                dispatch_on_main_thread(update_progress_ui)
+
+            def worker():
+                ok, msg = self._server_manager.update_server_runtime(
+                    self._prop_server_info.id,
+                    mc_version,
+                    loader_version,
+                    progress_callback=progress_cb,
+                    compatibility_plan=compatibility_plan,
+                )
+
+                def done():
+                    if ok:
+                        self._prop_server_info.mc_version = mc_version
+                        self._prop_server_info.loader_version = loader_version
+                        self._version_val.setText(f"{mc_version} ({loader_version})")
+                        self._refresh_upgrade_button()
+                        self._show_toast(msg)
+                        dialog.accept()
+                    else:
+                        QMessageBox.warning(dialog, "Update Failed", msg)
+                        cancel_btn.setEnabled(True)
+                        cancel_btn.setText("Back")
+                        stack.setCurrentIndex(1)
+                        primary_btn.setText("Update")
+                        primary_btn.setEnabled(True)
+
+                dispatch_on_main_thread(done)
+
+            import threading
+            threading.Thread(target=worker, daemon=True).start()
+
+        def on_primary():
+            if stack.currentIndex() == 0:
+                show_review()
+            else:
+                run_update()
+
+        primary_btn.clicked.connect(on_primary)
+
+        import threading
+        threading.Thread(target=load_versions, daemon=True).start()
+        dialog.exec()
 
     def _populate_properties(self) -> None:
         if not self._prop_config:

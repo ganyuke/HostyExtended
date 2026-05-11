@@ -3,11 +3,12 @@ PropertiesView - GUI editor for server.properties.
 Uses Adw.PreferencesPage with typed rows.
 """
 from typing import Optional
+import threading
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, GLib
 
 from hosty.shared.backend.config_manager import ConfigManager
 from hosty.shared.backend.server_manager import ServerManager, ServerInfo
@@ -71,11 +72,12 @@ class PropertiesView(Gtk.Box):
         )
         
         self._change_version_btn = Gtk.Button(
-            label="Change...",
+            icon_name="software-update-available-symbolic",
             valign=Gtk.Align.CENTER
         )
-        self._change_version_btn.add_css_class("pill")
-        # Ensure we connect a stub handler until fully wired up
+        self._change_version_btn.add_css_class("flat")
+        self._change_version_btn.set_tooltip_text("Upgrade server version")
+        self._change_version_btn.set_sensitive(False)
         self._change_version_btn.connect("clicked", self._on_change_version_clicked)
         self._version_row.add_suffix(self._change_version_btn)
         general.add(self._version_row)
@@ -120,7 +122,7 @@ class PropertiesView(Gtk.Box):
         )
         resources.add(self._ram_row)
         page.add(resources)
-        
+
         # ===== World Group =====
         world = Adw.PreferencesGroup(title="World")
         
@@ -304,11 +306,285 @@ class PropertiesView(Gtk.Box):
         if config:
             config.load()
             self._populate()
+        self._refresh_upgrade_button()
+
+    def _refresh_upgrade_button(self):
+        if not self._server_manager or not self._server_info or not self._change_version_btn:
+            return
+        self._change_version_btn.set_sensitive(False)
+        self._change_version_btn.set_tooltip_text("Checking for newer Minecraft versions...")
+
+        def worker():
+            versions = self._server_manager.download_manager.fetch_game_versions()
+            current = self._server_info.mc_version
+            has_upgrade = any(ServerManager.is_version_after(v, current) for v in versions)
+
+            def done():
+                self._change_version_btn.set_sensitive(has_upgrade)
+                if has_upgrade:
+                    self._change_version_btn.set_tooltip_text("Upgrade server version")
+                else:
+                    self._change_version_btn.set_tooltip_text("No newer Minecraft versions available")
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_change_version_clicked(self, button):
-        """Placeholder for change version dialog."""
-        self._show_toast("Version changing dialog not yet fully implemented in this view.", timeout=3)
+        if not self._server_manager or not self._server_info:
+            self._show_toast("Select a server first", timeout=3)
+            return
 
+        dialog = Adw.Dialog()
+        dialog.set_title("Change Version")
+        dialog.set_content_width(560)
+        dialog.set_content_height(520)
+
+        toolbar = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_show_start_title_buttons(False)
+        header.set_show_end_title_buttons(False)
+        cancel_btn = Gtk.Button(label="Cancel")
+        primary_btn = Gtk.Button(label="Next")
+        primary_btn.add_css_class("suggested-action")
+        primary_btn.set_sensitive(False)
+        header.pack_start(cancel_btn)
+        header.pack_end(primary_btn)
+        toolbar.add_top_bar(header)
+
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+
+        runtime_page = Adw.PreferencesPage()
+        runtime_group = Adw.PreferencesGroup(
+            title="Runtime",
+            description="Choose the target Minecraft version and Fabric loader.",
+        )
+        mc_values: list[str] = []
+        loader_values: list[str] = []
+        mc_row = Adw.ComboRow(title="Minecraft version", model=Gtk.StringList.new(["Loading..."]))
+        loader_row = Adw.ComboRow(title="Fabric loader", model=Gtk.StringList.new(["Loading..."]))
+        runtime_group.add(mc_row)
+        runtime_group.add(loader_row)
+        runtime_page.add(runtime_group)
+        stack.add_named(runtime_page, "runtime")
+
+        mods_page = Adw.PreferencesPage()
+        review_group = Adw.PreferencesGroup(
+            title="Mod Compatibility",
+        )
+        mods_page.add(review_group)
+        stack.add_named(mods_page, "mods")
+
+        progress_page = Adw.PreferencesPage()
+        progress_group = Adw.PreferencesGroup(title="Updating Server")
+        progress_row = Adw.ActionRow(title="Preparing update", subtitle="")
+        progress_spinner = Gtk.Spinner()
+        progress_row.add_suffix(progress_spinner)
+        progress_group.add(progress_row)
+        progress_bar = Gtk.ProgressBar()
+        progress_bar.set_margin_top(12)
+        progress_bar.set_margin_bottom(12)
+        progress_group.add(progress_bar)
+        progress_page.add(progress_group)
+        stack.add_named(progress_page, "progress")
+
+        review_rows: list[Gtk.Widget] = []
+        selected_mc = {"value": ""}
+        selected_loader = {"value": ""}
+        compatibility_plan: dict = {}
+
+        toolbar.set_content(stack)
+        dialog.set_child(toolbar)
+
+        def validate(*_args):
+            primary_btn.set_sensitive(bool(mc_values) and bool(loader_values))
+
+        mc_row.connect("notify::selected", validate)
+        loader_row.connect("notify::selected", validate)
+
+        def on_cancel(*_args):
+            visible = stack.get_visible_child_name()
+            if visible == "mods":
+                stack.set_visible_child_name("runtime")
+                cancel_btn.set_label("Cancel")
+                primary_btn.set_label("Next")
+                primary_btn.set_sensitive(bool(mc_values) and bool(loader_values))
+                return
+            if visible == "progress":
+                return
+            dialog.close()
+
+        cancel_btn.connect("clicked", on_cancel)
+
+        def add_review_row(row: Gtk.Widget) -> None:
+            review_group.add(row)
+            review_rows.append(row)
+
+        def clear_review_rows() -> None:
+            for row in review_rows:
+                review_group.remove(row)
+            review_rows.clear()
+
+        def add_plan_group(title: str, items: list[dict], fallback: str) -> None:
+            if not items:
+                add_review_row(Adw.ActionRow(title=fallback))
+                return
+            expander = Adw.ExpanderRow(title=title, subtitle=f"{len(items)} item(s)")
+            for item in items:
+                label = str(item.get("title") or item.get("filename") or "Unknown")
+                version = str(item.get("version_number") or item.get("version_id") or "").strip()
+                filename = str(item.get("filename") or item.get("current_filename") or "").strip()
+                subtitle = " · ".join([x for x in (version, filename) if x])
+                expander.add_row(Adw.ActionRow(title=label, subtitle=subtitle))
+            add_review_row(expander)
+
+        def versions_worker():
+            games = self._server_manager.download_manager.fetch_game_versions()
+            loaders = self._server_manager.download_manager.fetch_loader_versions()
+
+            def loaded():
+                current_mc = self._server_info.mc_version
+                current_loader = self._server_info.loader_version
+                next_games = [
+                    v for v in games
+                    if ServerManager.is_version_after(v, current_mc)
+                ]
+                next_loaders = [
+                    v for v in loaders
+                    if not current_loader or ServerManager.is_version_at_least(v, current_loader)
+                ]
+                mc_values.clear()
+                mc_values.extend(next_games)
+                loader_values.clear()
+                loader_values.extend(next_loaders)
+                mc_row.set_model(Gtk.StringList.new(mc_values or ["No versions found"]))
+                loader_row.set_model(Gtk.StringList.new(loader_values or ["No loaders found"]))
+                if mc_values:
+                    mc_row.set_selected(0)
+                if current_loader in loader_values:
+                    loader_row.set_selected(loader_values.index(current_loader))
+                elif loader_values:
+                    loader_row.set_selected(0)
+                validate()
+                return False
+
+            GLib.idle_add(loaded)
+
+        def show_mod_review(*_args):
+            if not mc_values or not loader_values:
+                return
+            selected_mc["value"] = mc_values[int(mc_row.get_selected())]
+            selected_loader["value"] = loader_values[int(loader_row.get_selected())]
+            primary_btn.set_sensitive(False)
+            primary_btn.set_label("Update")
+            cancel_btn.set_label("Back")
+            stack.set_visible_child_name("mods")
+            clear_review_rows()
+            loading_row = Adw.ActionRow(title="Checking installed mods and datapacks...")
+            loading_spinner = Gtk.Spinner()
+            loading_spinner.start()
+            loading_row.add_suffix(loading_spinner)
+            add_review_row(loading_row)
+
+            def worker():
+                plan = self._server_manager.scan_update_compatibility(
+                    self._server_info.id,
+                    selected_mc["value"],
+                )
+
+                def done():
+                    compatibility_plan.clear()
+                    compatibility_plan.update(plan)
+                    clear_review_rows()
+                    compatible = plan.get("compatible", {})
+                    incompatible = plan.get("incompatible", {})
+                    unknown = plan.get("unknown", {})
+                    add_plan_group(
+                        "Compatible and Will Be Updated",
+                        [*compatible.get("modpacks", []), *compatible.get("mods", []), *compatible.get("datapacks", [])],
+                        "No tracked compatible items found",
+                    )
+                    add_plan_group(
+                        "Incompatible and Will Be Disabled",
+                        [*incompatible.get("modpacks", []), *incompatible.get("mods", []), *incompatible.get("datapacks", [])],
+                        "No incompatible items found",
+                    )
+                    unknown_items = [*unknown.get("modpacks", []), *unknown.get("mods", []), *unknown.get("datapacks", [])]
+                    if unknown_items:
+                        add_plan_group("Could Not Check", unknown_items, "")
+                    primary_btn.set_label("Update")
+                    primary_btn.set_sensitive(True)
+                    return False
+
+                GLib.idle_add(done)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def run_update(*_args):
+            mc_version = selected_mc["value"]
+            loader_version = selected_loader["value"]
+            if not mc_version or not loader_version:
+                show_mod_review()
+                return
+            primary_btn.set_sensitive(False)
+            cancel_btn.set_sensitive(False)
+            primary_btn.set_label("Update")
+            stack.set_visible_child_name("progress")
+            progress_spinner.start()
+            progress_bar.set_fraction(0.0)
+            progress_row.set_title("Updating server")
+            progress_row.set_subtitle("")
+
+            def progress(frac, message):
+                def update_progress():
+                    progress_bar.set_fraction(max(0.0, min(1.0, float(frac))))
+                    progress_row.set_subtitle(str(message))
+                    return False
+
+                GLib.idle_add(update_progress)
+
+            def worker():
+                ok, msg = self._server_manager.update_server_runtime(
+                    self._server_info.id,
+                    mc_version,
+                    loader_version,
+                    progress_callback=progress,
+                    compatibility_plan=compatibility_plan,
+                )
+
+                def done():
+                    if ok:
+                        self._server_info.mc_version = mc_version
+                        self._server_info.loader_version = loader_version
+                        self._version_row.set_subtitle(f"{mc_version} ({loader_version})")
+                        self._refresh_upgrade_button()
+                        self._show_toast(msg, timeout=4)
+                        dialog.close()
+                    else:
+                        cancel_btn.set_sensitive(True)
+                        cancel_btn.set_label("Back")
+                        primary_btn.set_label("Update")
+                        primary_btn.set_sensitive(True)
+                        stack.set_visible_child_name("mods")
+                        progress_spinner.stop()
+                        self._show_toast(msg, timeout=5)
+                    return False
+
+                GLib.idle_add(done)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def on_primary(*_args):
+            if stack.get_visible_child_name() == "runtime":
+                show_mod_review()
+            else:
+                run_update()
+
+        primary_btn.connect("clicked", on_primary)
+        threading.Thread(target=versions_worker, daemon=True).start()
+        dialog.present(self.get_root())
 
     def reload_from_disk(self):
         """Reload properties from server.properties on disk."""

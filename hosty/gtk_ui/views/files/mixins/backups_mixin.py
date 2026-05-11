@@ -86,6 +86,15 @@ class BackupsMixin:
         actions.add(create_row)
         self._create_backup_row = create_row
 
+        full_row = Adw.ActionRow(
+            title="Create full backup",
+            subtitle="Back up the whole server folder, including mods and executables",
+        )
+        full_row.add_prefix(Gtk.Image.new_from_icon_name("drive-harddisk-symbolic"))
+        full_row.set_activatable(True)
+        full_row.connect("activated", lambda *_: self._on_create_full_backup())
+        actions.add(full_row)
+
         open_row = Adw.ActionRow(title="Open backups folder")
         open_row.add_prefix(Gtk.Image.new_from_icon_name("folder-open-symbolic"))
         open_row.set_activatable(True)
@@ -135,10 +144,8 @@ class BackupsMixin:
         # Check if it's a full backup and has a version in the filename
         version_str = ""
         if zp.name.startswith("hosty-full-backup-"):
-            parts = zp.name.split("-")
-            # e.g., hosty-full-backup-1.20.4-20260510-123000.zip
-            if len(parts) >= 6:
-                version = parts[3]
+            version = ServerManager.backup_game_version(zp)
+            if version:
                 version_str = f" Version {version} ·"
 
         row.set_subtitle(f"{_format_size(st.st_size)} ·{version_str} {_format_mtime(st.st_mtime)}")
@@ -224,6 +231,47 @@ class BackupsMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_create_full_backup(self) -> None:
+        if self._backup_busy:
+            self._alert("Backup in progress", "Please wait for the current backup task to finish.")
+            return
+        if self._is_running():
+            self._alert("Server is running", "Stop the server before creating a full backup.")
+            return
+        if not self._server_info or not self._server_manager:
+            self._alert("No server selected", "Select a server to manage backups.")
+            return
+
+        self._backup_busy = True
+        if self._backup_spinner:
+            self._backup_spinner.set_visible(True)
+            self._backup_spinner.start()
+        if self._create_backup_row:
+            self._create_backup_row.set_subtitle("Creating full backup...")
+
+        server_id = self._server_info.id
+
+        def worker():
+            ok, msg = self._server_manager.create_full_backup(server_id)
+
+            def done():
+                self._backup_busy = False
+                if self._backup_spinner:
+                    self._backup_spinner.stop()
+                    self._backup_spinner.set_visible(False)
+                if self._create_backup_row:
+                    self._create_backup_row.set_subtitle("Back up world folders only")
+                self._refresh_backup_list()
+                if ok:
+                    self._toast(f"Saved {msg}")
+                else:
+                    self._alert("Full backup failed", msg)
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _confirm_restore_backup(self, zp: Path) -> None:
         if self._is_running():
             self._alert("Server is running", "Stop the server before restoring a backup.")
@@ -236,6 +284,13 @@ class BackupsMixin:
         body_text = f"Restore “{zp.name}”?\n\n"
         if is_full:
             body_text += "WARNING: This is a full backup. Restoring it will completely replace ALL server configuration, mods, and world files."
+            backup_version = ServerManager.backup_game_version(zp)
+            current_version = self._server_info.mc_version if self._server_info else ""
+            if backup_version and current_version and ServerManager.is_version_older(backup_version, current_version):
+                body_text += (
+                    f"\n\nDowngrade warning: this backup is for Minecraft {backup_version}, "
+                    f"but this server is currently on Minecraft {current_version}."
+                )
         else:
             body_text += "This replaces only world folders contained in the backup."
         
@@ -361,4 +416,3 @@ class BackupsMixin:
             self._alert("No server selected", "Select a server to open backups.")
             return
         self._open_target(bdir)
-

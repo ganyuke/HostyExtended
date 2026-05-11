@@ -4,6 +4,7 @@ Installed Mods page for the Files tab.
 
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -109,17 +110,34 @@ class ModsPage(QWidget):
             lbl = QLabel("No mods installed yet.")
             lbl.setProperty("class", "dim")
             self._content_layout.addWidget(lbl)
-            return
+        else:
+            jars = sorted(mods_dir.glob("*.jar"), key=lambda p: p.name.lower())
+            if not jars:
+                lbl = QLabel("No mod .jar files found.")
+                lbl.setProperty("class", "dim")
+                self._content_layout.addWidget(lbl)
+            else:
+                for jar in jars:
+                    self._content_layout.addWidget(self._build_row(jar))
 
-        jars = sorted(mods_dir.glob("*.jar"), key=lambda p: p.name.lower())
-        if not jars:
-            lbl = QLabel("No mod .jar files found.")
+        disabled = self._server_manager.get_incompatible_components(self._server_info.id)
+        disabled_items = []
+        for key in ("modpacks", "mods", "datapacks"):
+            for item in disabled.get(key, []):
+                payload = dict(item)
+                payload["_kind"] = key[:-1] if key.endswith("s") else key
+                disabled_items.append(payload)
+
+        header = QLabel("Disabled by Version Updates")
+        header.setProperty("class", "title")
+        self._content_layout.addWidget(header)
+        if not disabled_items:
+            lbl = QLabel("No disabled items.")
             lbl.setProperty("class", "dim")
             self._content_layout.addWidget(lbl)
-            return
-
-        for jar in jars:
-            self._content_layout.addWidget(self._build_row(jar))
+        else:
+            for item in disabled_items:
+                self._content_layout.addWidget(self._build_disabled_row(item))
 
     def _build_row(self, jar: Path) -> QWidget:
         card = QWidget()
@@ -145,6 +163,44 @@ class ModsPage(QWidget):
         del_btn.setProperty("class", "destructive")
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         del_btn.clicked.connect(lambda *_args, p=jar: self._delete_mod(p))
+        layout.addWidget(del_btn)
+
+        return card
+
+    def _build_disabled_row(self, item: dict) -> QWidget:
+        card = QWidget()
+        card.setProperty("class", "card")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(16, 12, 16, 12)
+
+        title_text = str(item.get("title") or item.get("filename") or "Unknown")
+        filename = str(item.get("filename") or "")
+        kind = str(item.get("_kind") or "mod")
+        reason = str(item.get("reason") or "")
+        project_id = str(item.get("project_id") or "")
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(4)
+        title = QLabel(title_text)
+        title.setProperty("class", "title")
+        text_col.addWidget(title)
+        sub = QLabel(" · ".join([x for x in (kind.title(), filename, reason) if x]))
+        sub.setProperty("class", "dim")
+        text_col.addWidget(sub)
+        layout.addLayout(text_col, 1)
+
+        if project_id:
+            route = {"mod": "mod", "modpack": "modpack", "datapack": "datapack"}.get(kind, "mod")
+            open_btn = QPushButton("Open")
+            open_btn.setProperty("class", "flat")
+            open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            open_btn.clicked.connect(lambda *_args, r=route, pid=project_id: webbrowser.open(f"https://modrinth.com/{r}/{pid}"))
+            layout.addWidget(open_btn)
+
+        del_btn = QPushButton("Delete")
+        del_btn.setProperty("class", "destructive")
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.clicked.connect(lambda *_args, k=kind, pid=project_id, fn=filename: self._delete_disabled(k, pid, fn))
         layout.addWidget(del_btn)
 
         return card
@@ -177,3 +233,15 @@ class ModsPage(QWidget):
             except Exception as e:
                 self._status_lbl.setText(f"✗ Could not delete: {e}")
             self._refresh()
+
+    def _delete_disabled(self, kind: str, project_id: str, filename: str) -> None:
+        if not self._server_info:
+            return
+        ok, msg = self._server_manager.delete_incompatible_component(
+            self._server_info.id,
+            kind,
+            project_id=project_id,
+            filename=filename,
+        )
+        self._status_lbl.setText(("✓ " if ok else "✗ ") + msg)
+        self._refresh()

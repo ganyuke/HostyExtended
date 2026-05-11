@@ -58,9 +58,12 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         self._world_rows: list[Gtk.Widget] = []
         self._mod_rows: list[Gtk.Widget] = []
         self._datapack_rows: list[Gtk.Widget] = []
+        self._disabled_rows: list[Gtk.Widget] = []
         self._mods_expander: Optional[Adw.ExpanderRow] = None
         self._datapacks_expander: Optional[Adw.ExpanderRow] = None
+        self._disabled_expander: Optional[Adw.ExpanderRow] = None
         self._worlds_snapshot: tuple[tuple[str, tuple[str, ...]], ...] = tuple()
+        self._disabled_snapshot: tuple[tuple[str, str, str], ...] = tuple()
 
         self._backups_group: Optional[Adw.PreferencesGroup] = None
         self._backups_row: Optional[Adw.ActionRow] = None
@@ -149,6 +152,11 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         self._datapacks_expander = datapacks_expander
         self._mods_group.add(datapacks_expander)
 
+        disabled_expander = Adw.ExpanderRow(title="Disabled by Version Updates")
+        disabled_expander.set_expanded(False)
+        self._disabled_expander = disabled_expander
+        self._mods_group.add(disabled_expander)
+
         page.add(self._mods_group)
 
         self._players_group = Adw.PreferencesGroup(title="Players")
@@ -161,6 +169,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         self._server_info = server_info
         self._server_manager = server_manager
         self._worlds_snapshot = tuple()
+        self._disabled_snapshot = tuple()
         self._refresh_backups_row_subtitle()
         self._rebuild_lists()
 
@@ -170,7 +179,8 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
             return
 
         snapshot = self._build_worlds_snapshot()
-        if force or snapshot != self._worlds_snapshot:
+        disabled_snapshot = self._build_disabled_snapshot()
+        if force or snapshot != self._worlds_snapshot or disabled_snapshot != self._disabled_snapshot:
             self._rebuild_lists()
 
     def _pop_to_root(self) -> None:
@@ -236,6 +246,14 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                     pass
         self._datapack_rows.clear()
 
+        if self._disabled_expander:
+            for row in list(self._disabled_rows):
+                try:
+                    self._disabled_expander.remove(row)
+                except Exception:
+                    pass
+        self._disabled_rows.clear()
+
         root = self._server_dir()
         if not root or not root.is_dir():
             self._world_rows.append(self._add_info_row(self._worlds_group, "No server folder"))
@@ -245,7 +263,11 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
             if self._datapacks_expander:
                 info = self._add_info_row_to_expander(self._datapacks_expander, "No server folder")
                 self._datapack_rows.append(info)
+            if self._disabled_expander:
+                info = self._add_info_row_to_expander(self._disabled_expander, "No server folder")
+                self._disabled_rows.append(info)
             self._worlds_snapshot = tuple()
+            self._disabled_snapshot = tuple()
             return
 
         worlds = _world_dirs(root)
@@ -343,7 +365,58 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                 f"{real_count} item{'s' if real_count != 1 else ''}" if real_count else "None installed"
             )
 
+        # ---- Disabled by Version Updates expander ----
+        if self._disabled_expander and self._server_manager and self._server_info:
+            disabled = self._server_manager.get_incompatible_components(self._server_info.id)
+            disabled_items: list[dict[str, str]] = []
+            for key in ("modpacks", "mods", "datapacks"):
+                for item in disabled.get(key, []):
+                    payload = dict(item)
+                    payload["_kind"] = key[:-1] if key.endswith("s") else key
+                    disabled_items.append(payload)
+
+            for item in disabled_items:
+                title = str(item.get("title") or item.get("filename") or "Unknown")
+                kind = str(item.get("_kind") or "item").replace("modpack", "modpack")
+                filename = str(item.get("filename") or "").strip()
+                project_id = str(item.get("project_id") or "").strip()
+                reason = str(item.get("reason") or "").strip()
+                subtitle = " · ".join([x for x in (kind.title(), filename, reason) if x])
+                row = Adw.ActionRow(title=title, subtitle=subtitle)
+                row.set_activatable(False)
+                if project_id:
+                    route = {
+                        "mod": "mod",
+                        "modpack": "modpack",
+                        "datapack": "datapack",
+                    }.get(kind, "mod")
+                    open_btn = self._icon_button(
+                        "web-browser-symbolic",
+                        "Open Modrinth page",
+                        lambda *_p, pid=project_id, r=route: _open_uri(f"https://modrinth.com/{r}/{pid}"),
+                    )
+                    row.add_suffix(open_btn)
+                delete_btn = self._icon_button(
+                    "user-trash-symbolic",
+                    "Delete disabled file",
+                    lambda *_p, k=kind, pid=project_id, fn=filename: self._delete_disabled_component(k, pid, fn),
+                    destructive=True,
+                )
+                row.add_suffix(delete_btn)
+                self._disabled_expander.add_row(row)
+                self._disabled_rows.append(row)
+
+            if not self._disabled_rows:
+                info = self._add_info_row_to_expander(self._disabled_expander, "No disabled items")
+                self._disabled_rows.append(info)
+
+            count = len(disabled_items)
+            self._disabled_expander.set_subtitle(
+                f"{count} item{'s' if count != 1 else ''}" if count else "None disabled"
+            )
+
         self._worlds_snapshot = self._build_worlds_snapshot()
+        self._disabled_snapshot = self._build_disabled_snapshot()
 
     def _refresh_backups_row_subtitle(self) -> None:
         if not self._backups_row:
@@ -378,6 +451,35 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
             snapshot.append((world.name.lower(), tuple(sorted(dim_keys))))
 
         return tuple(snapshot)
+
+    def _build_disabled_snapshot(self) -> tuple[tuple[str, str, str], ...]:
+        if not self._server_manager or not self._server_info:
+            return tuple()
+        data = self._server_manager.get_incompatible_components(self._server_info.id)
+        items: list[tuple[str, str, str]] = []
+        for key in ("modpacks", "mods", "datapacks"):
+            for item in data.get(key, []):
+                items.append((
+                    key,
+                    str(item.get("project_id") or ""),
+                    str(item.get("filename") or ""),
+                ))
+        return tuple(sorted(items))
+
+    def _delete_disabled_component(self, kind: str, project_id: str, filename: str) -> None:
+        if not self._server_manager or not self._server_info:
+            return
+        ok, msg = self._server_manager.delete_incompatible_component(
+            self._server_info.id,
+            kind,
+            project_id=project_id,
+            filename=filename,
+        )
+        if ok:
+            self._toast(msg)
+            self._rebuild_lists()
+        else:
+            self._alert("Could not delete disabled item", msg)
 
     def _add_info_row(self, group: Adw.PreferencesGroup, title: str) -> Adw.ActionRow:
         row = Adw.ActionRow(title=title)

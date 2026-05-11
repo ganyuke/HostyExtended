@@ -75,6 +75,12 @@ class BackupsPage(QWidget):
         self._create_btn.clicked.connect(self._create_backup)
         header_layout.addWidget(self._create_btn)
 
+        self._full_backup_btn = QPushButton("Create Full Backup")
+        self._full_backup_btn.setProperty("class", "flat")
+        self._full_backup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._full_backup_btn.clicked.connect(self._create_full_backup)
+        header_layout.addWidget(self._full_backup_btn)
+
         layout.addWidget(header)
 
         # Status label (replaces modal popups)
@@ -102,6 +108,7 @@ class BackupsPage(QWidget):
         self._server_info = info
         self._create_btn.setText("Create Backup")
         self._create_btn.setEnabled(True)
+        self._full_backup_btn.setEnabled(True)
         self._status_lbl.setText("")
         self._refresh()
 
@@ -115,7 +122,7 @@ class BackupsPage(QWidget):
         if not self._server_info or not self._server_info.server_dir.exists():
             return
 
-        bdir = self._server_info.server_dir / "backups"
+        bdir = self._server_info.server_dir / "hosty-backups"
         if not bdir.exists():
             bdir.mkdir(parents=True, exist_ok=True)
 
@@ -145,9 +152,8 @@ class BackupsPage(QWidget):
 
         version_str = ""
         if zip_path.name.startswith("hosty-full-backup-"):
-            parts = zip_path.name.split("-")
-            if len(parts) >= 6:
-                version = parts[3]
+            version = ServerManager.backup_game_version(zip_path)
+            if version:
                 version_str = f" Version {version} ·"
 
         sub = QLabel(f"{_format_size(st.st_size)} ·{version_str} {_format_mtime(st.st_mtime)}")
@@ -175,6 +181,7 @@ class BackupsPage(QWidget):
             return
 
         self._create_btn.setEnabled(False)
+        self._full_backup_btn.setEnabled(False)
         self._create_btn.setText("Creating...")
         self._status_lbl.setText("Creating backup…")
 
@@ -185,9 +192,38 @@ class BackupsPage(QWidget):
 
             def ui_done():
                 self._create_btn.setEnabled(True)
+                self._full_backup_btn.setEnabled(True)
                 self._create_btn.setText("Create Backup")
                 if ok:
                     self._status_lbl.setText(f"✓ Backup created: {msg}")
+                else:
+                    self._status_lbl.setText(f"✗ Failed: {msg}")
+                self._refresh()
+
+            dispatch_on_main_thread(ui_done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _create_full_backup(self) -> None:
+        if not self._server_info:
+            return
+
+        self._create_btn.setEnabled(False)
+        self._full_backup_btn.setEnabled(False)
+        self._full_backup_btn.setText("Creating...")
+        self._status_lbl.setText("Creating full backup...")
+
+        server_id = self._server_info.id
+
+        def worker():
+            ok, msg = self._server_manager.create_full_backup(server_id)
+
+            def ui_done():
+                self._create_btn.setEnabled(True)
+                self._full_backup_btn.setEnabled(True)
+                self._full_backup_btn.setText("Create Full Backup")
+                if ok:
+                    self._status_lbl.setText(f"✓ Full backup created: {msg}")
                 else:
                     self._status_lbl.setText(f"✗ Failed: {msg}")
                 self._refresh()
@@ -208,6 +244,13 @@ class BackupsPage(QWidget):
         is_full = zip_path.name.startswith("hosty-full-backup-")
         if is_full:
             msg = f"Are you sure you want to restore '{zip_path.name}'?\n\nWARNING: This is a full backup. Restoring it will completely replace ALL server configuration, mods, and world files."
+            backup_version = ServerManager.backup_game_version(zip_path)
+            current_version = self._server_info.mc_version if self._server_info else ""
+            if backup_version and current_version and ServerManager.is_version_older(backup_version, current_version):
+                msg += (
+                    f"\n\nDowngrade warning: this backup is for Minecraft {backup_version}, "
+                    f"but this server is currently on Minecraft {current_version}."
+                )
         else:
             msg = f"Are you sure you want to restore '{zip_path.name}'?\n\nThis will overwrite existing world files."
 
@@ -221,6 +264,7 @@ class BackupsPage(QWidget):
             return
 
         self._create_btn.setEnabled(False)
+        self._full_backup_btn.setEnabled(False)
         self._create_btn.setText("Restoring...")
         self._status_lbl.setText("Restoring backup…")
 
@@ -231,6 +275,7 @@ class BackupsPage(QWidget):
 
             def ui_done():
                 self._create_btn.setEnabled(True)
+                self._full_backup_btn.setEnabled(True)
                 self._create_btn.setText("Create Backup")
                 if ok:
                     self._status_lbl.setText("✓ Backup restored successfully.")
