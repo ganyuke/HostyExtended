@@ -36,6 +36,7 @@ class ModrinthHit:
 class ModrinthVersion:
     version_id: str
     project_id: str
+    title: str
     name: str
     version_number: str
     game_versions: list[str]
@@ -60,6 +61,7 @@ def _version_to_model(ver: dict[str, Any]) -> Optional[ModrinthVersion]:
     return ModrinthVersion(
         version_id=ver.get("id", ""),
         project_id=ver.get("project_id", ""),
+        title=ver.get("title", ""),
         name=ver.get("name", ""),
         version_number=ver.get("version_number", ""),
         game_versions=[str(v) for v in (ver.get("game_versions") or [])],
@@ -329,6 +331,11 @@ def resolve_required_dependencies(
             continue
         if not version_obj.download_url:
             continue
+
+        if not str(getattr(version_obj, "title", "")).strip():
+            project = get_project(version_obj.project_id or dep_project_id)
+            if isinstance(project, dict):
+                version_obj.title = str(project.get("title", "") or "").strip()
 
         key = version_obj.version_id or version_obj.filename
         if key in seen:

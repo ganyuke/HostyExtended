@@ -642,6 +642,20 @@ class ModsMixin:
             parents.add(parent_key)
             req[dep_key] = sorted(parents)
 
+            dep_project_id = str(getattr(dep, "project_id", "")).strip()
+            dep_title = str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id or dep_key).strip()
+            dep_version_id = str(getattr(dep, "version_id", "")).strip()
+            dep_version_number = str(getattr(dep, "version_number", "")).strip()
+            dep_filename = str(getattr(dep, "filename", "")).strip()
+            if dep_project_id and dep_filename:
+                self._record_individual_mod_install(
+                    dep_project_id,
+                    dep_title or dep_project_id,
+                    dep_version_id,
+                    dep_filename,
+                    version_number=dep_version_number,
+                )
+
         self._write_mod_dependency_state(state)
 
     def _remove_mod_from_dependency_state(self, removed_filename: str) -> None:

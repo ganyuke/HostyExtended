@@ -693,6 +693,14 @@ class ServerManager(EventEmitter):
                     if dep_name.casefold() in managed_mods or dep_name.casefold() == filename.casefold():
                         continue
                     modrinth_client.download_to(dep.download_url, mods_dir / dep_name)
+                    dep_project_id = str(getattr(dep, "project_id", "") or "").strip()
+                    if dep_project_id:
+                        mod_state[dep_project_id] = {
+                            "title": str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id).strip(),
+                            "version_id": str(getattr(dep, "version_id", "") or "").strip(),
+                            "version_number": str(getattr(dep, "version_number", "") or "").strip(),
+                            "filename": dep_name,
+                        }
 
                 modrinth_client.download_to(download_url, mods_dir / filename)
                 old_filename = str(entry.get("current_filename", "")).strip()

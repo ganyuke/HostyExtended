@@ -999,6 +999,16 @@ class PlayitMixin:
                 parents = set(req.get(dep_key, []))
                 parents.add(parent_key)
                 req[dep_key] = sorted(parents)
+
+                dep_project_id = str(getattr(dep, "project_id", "") or "").strip()
+                dep_title = str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id or dep_key).strip()
+                dep_filename = str(getattr(dep, "filename", "") or "").strip()
+                if dep_project_id and dep_filename:
+                    self._record_tunnel_installed_mod(
+                        dep_project_id,
+                        dep_title or dep_project_id,
+                        dep,
+                    )
             state_path.write_text(json.dumps({"required_by": req}, indent=2), encoding="utf-8")
         except Exception:
             pass

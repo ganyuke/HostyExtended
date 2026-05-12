@@ -501,6 +501,7 @@ class ModrinthPage(QWidget):
                                 chosen.version_id, self._server_info.mc_version, "fabric"
                             )
                             installed_local = {p.name.lower() for p in mod_dir.glob("*.jar")}
+                            dep_state = self._server_manager._tracked_mod_state(server_dir)
                             for dep in deps:
                                 dep_name = dep.filename.lower()
                                 if dep_name in installed_local or dep_name == chosen.filename.lower():
@@ -510,8 +511,17 @@ class ModrinthPage(QWidget):
                                 )
                                 try:
                                     modrinth.download_to(dep.download_url, mod_dir / dep.filename)
+                                    dep_project_id = str(getattr(dep, "project_id", "") or "").strip()
+                                    if dep_project_id:
+                                        dep_state[dep_project_id] = {
+                                            "title": str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id).strip(),
+                                            "version_id": str(getattr(dep, "version_id", "") or "").strip(),
+                                            "version_number": str(getattr(dep, "version_number", "") or "").strip(),
+                                            "filename": str(dep.filename),
+                                        }
                                 except Exception:
                                     pass
+                            self._server_manager._write_json_file(server_dir / ".hosty-mod-installs.json", {"mods": dep_state})
                         self._configure_known_mod_after_download(hit)
 
                     dispatch_on_main_thread(lambda: self._finish_install(hit.title, True, "", install_btn))
