@@ -16,9 +16,9 @@ class HostyApp(Protocol):
 def create_application() -> HostyApp:
     """Create the appropriate frontend for the current platform."""
     if sys.platform == "win32":
-        from hosty.qt_ui.application import HostyWindowsApplication
+        from hosty.winui_launcher import HostyWinUIApp
 
-        return HostyWindowsApplication()
+        return HostyWinUIApp()
 
     from hosty.gtk_ui.application import HostyApplication
 

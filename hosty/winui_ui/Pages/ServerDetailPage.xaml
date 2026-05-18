@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="winui_ui.Pages.ServerDetailPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:winui_ui.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <TabView x:Name="ServerTabView" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent" Margin="0,12,0,0">
+        <TabViewItem Header="Overview" IsClosable="False">
+            <TabViewItem.IconSource>
+                <SymbolIconSource Symbol="Home" />
+            </TabViewItem.IconSource>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <Grid Padding="24,16,24,16" RowSpacing="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Header Section -->
+                    <Grid Grid.Row="0" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        
+                        <Image x:Name="ServerIcon" Width="48" Height="48" Source="ms-appx:///Assets/StoreLogo.png" VerticalAlignment="Center" />
+                        
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock x:Name="ServerNameTitle" Style="{StaticResource TitleTextBlockStyle}" Text="Server Name" />
+                            <TextBlock x:Name="ServerSubtitle" Style="{StaticResource CaptionTextBlockStyle}" Text="Minecraft 1.20.4 • Fabric" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="StartButton" Content="Start" Click="StartButton_Click" Style="{StaticResource AccentButtonStyle}" Width="80" />
+                            <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" Width="80" IsEnabled="False" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Status Indicator / Cards -->
+                    <StackPanel Grid.Row="1" Spacing="16">
+                        <!-- Status Card -->
+                        <Border CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Padding="16">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="STATUS" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                    <TextBlock x:Name="StatusText" Text="Offline" Style="{StaticResource SubtitleTextBlockStyle}" Foreground="Red" FontWeight="SemiBold" />
+                                </StackPanel>
+                                
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="24" VerticalAlignment="Center" x:Name="StatsPanel" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock Text="CPU USAGE" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                        <TextBlock x:Name="CpuText" Text="—" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="RAM USAGE" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                        <TextBlock x:Name="RamUsageText" Text="—" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="PLAYERS" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                        <TextBlock x:Name="PlayerCountText" Text="—" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Main Config Settings -->
+                    <Grid Grid.Row="2" ColumnSpacing="24" RowSpacing="24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left Column: Settings -->
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Server Configuration" Style="{StaticResource SubheaderTextBlockStyle}" />
+
+                            <!-- Allocation Card -->
+                            <Border CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Padding="16">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="RAM Allocation" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <Slider x:Name="RamSlider" Minimum="1024" Maximum="16384" StepFrequency="1024" ValueChanged="RamSlider_ValueChanged" />
+                                    <TextBlock x:Name="RamValueText" Text="4096 MB (4 GB)" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Auto-backup settings -->
+                            <Border CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Padding="16">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Auto Backup" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock Text="Automatically backup the world on server stop" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" x:Name="AutoBackupToggle" IsOn="True" Toggled="AutoBackupToggle_Toggled" OnContent="" OffContent="" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Right Column: playit.gg integration -->
+                        <StackPanel Grid.Column="1" Spacing="16">
+                            <TextBlock Text="Playit.gg Tunnel" Style="{StaticResource SubheaderTextBlockStyle}" />
+
+                            <Border CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Padding="16">
+                                <StackPanel Spacing="12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Enable Playit Tunnel" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock Text="Expose server securely without port forwarding" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" />
+                                        </StackPanel>
+                                        <ToggleSwitch Grid.Column="1" x:Name="PlayitToggle" Toggled="PlayitToggle_Toggled" OnContent="" OffContent="" />
+                                    </Grid>
+
+                                    <PasswordBox x:Name="PlayitSecretBox" Header="Playit Secret Key" PlaceholderText="Enter playit secret" PasswordChanged="PlayitSecretBox_PasswordChanged" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </ScrollViewer>
+        </TabViewItem>
+
+        <TabViewItem Header="Console" IsClosable="False">
+            <TabViewItem.IconSource>
+                <SymbolIconSource Symbol="Message" />
+            </TabViewItem.IconSource>
+            <Grid Padding="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border Background="{ThemeResource ControlFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" Padding="8">
+                    <ScrollViewer x:Name="ConsoleScroll">
+                        <TextBlock x:Name="ConsoleText" FontFamily="Consolas" TextWrapping="Wrap" />
+                    </ScrollViewer>
+                </Border>
+                <TextBox x:Name="ConsoleInputBox" Grid.Row="1" Margin="0,12,0,0" PlaceholderText="Enter a command (e.g. /say Hello)" KeyDown="ConsoleInputBox_KeyDown" />
+            </Grid>
+        </TabViewItem>
+
+        <TabViewItem Header="Properties" IsClosable="False">
+            <TabViewItem.IconSource>
+                <SymbolIconSource Symbol="Setting" />
+            </TabViewItem.IconSource>
+            <Grid Padding="24">
+                <TextBlock Text="server.properties editor goes here" Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Grid>
+        </TabViewItem>
+    </TabView>
+</Page>

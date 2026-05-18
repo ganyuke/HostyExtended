@@ -1,1 +1,0 @@
-"""Windows frontend implementation package."""
