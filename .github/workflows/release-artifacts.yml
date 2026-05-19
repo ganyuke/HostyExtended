@@ -26,7 +26,7 @@ jobs:
             git
             zip
             mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-python-pyinstaller
+            mingw-w64-ucrt-x86_64-python-pip
             mingw-w64-ucrt-x86_64-python-requests
             mingw-w64-ucrt-x86_64-python-psutil
             mingw-w64-ucrt-x86_64-python-pillow
@@ -35,6 +35,11 @@ jobs:
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-gsettings-desktop-schemas
+
+      - name: Install PyInstaller
+        shell: msys2 {0}
+        run: |
+          python -m pip install --upgrade pyinstaller
 
       - name: Read app version
         id: version
@@ -104,85 +109,11 @@ jobs:
           name: hosty-windows-${{ steps.version.outputs.version }}
           path: dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.zip
 
-  build-linux-flatpak:
-    name: Build Linux Flatpak
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read app version
-        id: version
-        run: |
-          VERSION=$(python3 -c "import re; from pathlib import Path; text = Path('hosty/version.py').read_text(encoding='utf-8'); match = re.search(r'^__version__\\s*=\\s*\"([^\"]+)\"', text, re.MULTILINE); print(match.group(1) if match else '')")
-          if [ -z "$VERSION" ]; then
-            echo "__version__ not found" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Validate release tag matches app version
-        if: github.event_name == 'release'
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${{ steps.version.outputs.version }}"
-
-          normalize_version() {
-            value="$1"
-            value="${value#v}"
-            value="${value#V}"
-            if [[ "$value" =~ ^[0-9]+\.[0-9]+$ ]]; then
-              echo "$value.0"
-              return 0
-            fi
-            if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "$value"
-              return 0
-            fi
-            return 1
-          }
-
-          if ! NORMALIZED_TAG="$(normalize_version "$TAG")" || ! NORMALIZED_VERSION="$(normalize_version "$VERSION")" || [ "$NORMALIZED_TAG" != "$NORMALIZED_VERSION" ]; then
-            echo "Release tag '$TAG' does not match app version '$VERSION'" >&2
-            exit 1
-          fi
-
-      - name: Install Flatpak tooling and GNOME SDK
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          # Install GNOME SDK and Platform 50 required by the manifest
-          flatpak --user install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50
-
-      - name: Cache Flatpak downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local/share/flatpak
-            ~/.var/app
-          key: ${{ runner.os }}-flatpak-sdk-50-${{ hashFiles('packaging/flatpak/**') }}
-          restore-keys: |
-            ${{ runner.os }}-flatpak-sdk-50-
-
-      - name: Build Flatpak bundle
-        run: |
-          flatpak-builder --user --force-clean --default-branch=stable --repo=repo build-dir packaging/flatpak/io.github.sugarycandybar.Hosty.yml
-          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo repo "Hosty-${{ steps.version.outputs.version }}-x86_64.flatpak" io.github.sugarycandybar.Hosty stable --arch=x86_64
-
-      - name: Upload Flatpak artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hosty-linux-flatpak
-          path: ./*.flatpak
 
   upload-release-assets:
     name: Upload assets to GitHub Release
     runs-on: ubuntu-latest
-    needs:
-      - build-windows-exe
-      - build-linux-flatpak
+    needs: build-windows-exe
     if: github.event_name == 'release'
 
     steps:
@@ -197,4 +128,3 @@ jobs:
         with:
           files: |
             release-assets/**/*.zip
-            release-assets/**/*.flatpak
