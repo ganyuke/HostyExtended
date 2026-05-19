@@ -3,6 +3,9 @@ Application preferences window
 """
 from __future__ import annotations
 
+import os
+import sys
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -13,6 +16,16 @@ from hosty.shared.utils.constants import (
 )
 from hosty.shared.backend.preferences_manager import PreferencesManager
 from hosty.shared.backend.server_manager import ServerManager
+
+
+def _open_data_folder() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    if sys.platform == "win32":
+        os.startfile(str(DATA_DIR))
+        return
+
+    Gio.AppInfo.launch_default_for_uri(DATA_DIR.as_uri())
 
 
 def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager, server_manager: ServerManager | None = None):
@@ -27,7 +40,7 @@ def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager,
     data_button = Gtk.Button(valign=Gtk.Align.CENTER)
     data_image = Gtk.Image.new_from_icon_name("folder-open-symbolic")
     data_button.set_child(data_image)
-    data_button.connect("clicked", lambda _: Gio.AppInfo.launch_default_for_uri(f"file://{DATA_DIR}"))
+    data_button.connect("clicked", lambda _: _open_data_folder())
     data_row.add_suffix(data_button)
     group.add(data_row)
 

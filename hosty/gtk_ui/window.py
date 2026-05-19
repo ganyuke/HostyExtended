@@ -10,6 +10,7 @@ from gi.repository import Gtk, Adw, GLib, GObject
 
 from hosty.shared.backend.playit_config import load_playit_config
 from hosty.shared.backend.server_manager import ServerManager
+from hosty.shared.utils.constants import APP_ID
 from hosty.gtk_ui.views.sidebar import Sidebar
 from hosty.gtk_ui.views.server_detail import ServerDetailView
 from hosty.gtk_ui.views.welcome_view import WelcomeView
@@ -28,6 +29,10 @@ class HostyWindow(Adw.ApplicationWindow):
         self._playit_autostart_paused_server_id: str | None = None
         
         self.set_title("Hosty")
+        try:
+            self.set_icon_name(APP_ID)
+        except Exception:
+            pass
         self.set_default_size(1000, 700)
         self.set_size_request(400, 400)
         self.add_css_class("hosty-window")

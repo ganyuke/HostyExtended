@@ -34,6 +34,8 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-gdk-pixbuf2
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-webp-pixbuf-loader
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-gsettings-desktop-schemas
 
@@ -89,12 +91,21 @@ jobs:
           PIXBUF_LOADERS="$(cygpath -w /ucrt64/lib/gdk-pixbuf-2.0)"
           APP_ICONS="$(cygpath -w packaging/linux)"
 
+          mkdir -p build
+          rsvg-convert -w 256 -h 256 packaging/linux/io.github.sugarycandybar.Hosty.svg -o build/Hosty.png
+          python - <<'PY'
+          from PIL import Image
+          img = Image.open("build/Hosty.png")
+          img.save("build/Hosty.ico", sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+          PY
+
           pyinstaller \
             --noconfirm \
             --clean \
             --onedir \
             --windowed \
             --name Hosty \
+            --icon build/Hosty.ico \
             --collect-submodules gi \
             --collect-submodules hosty \
             --add-data "$GI_TYPELIBS;lib/girepository-1.0" \
@@ -103,6 +114,9 @@ jobs:
             --add-data "$PIXBUF_LOADERS;lib/gdk-pixbuf-2.0" \
             --add-data "$APP_ICONS;icons" \
             hosty.py
+
+          BUNDLE_PIXBUF_LOADERS="$(cygpath -w "$(pwd)/dist/Hosty/lib/gdk-pixbuf-2.0/2.10.0/loaders")"
+          GDK_PIXBUF_MODULEDIR="$BUNDLE_PIXBUF_LOADERS" gdk-pixbuf-query-loaders > "dist/Hosty/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
 
       - name: Zip portable app
         shell: msys2 {0}

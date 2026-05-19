@@ -51,6 +51,20 @@ def _configure_frozen_gtk_environment() -> None:
         os.environ.setdefault("GDK_PIXBUF_MODULE_FILE", str(loaders_cache))
 
 
+def _configure_windows_app_identity() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "io.github.sugarycandybar.Hosty"
+        )
+    except Exception:
+        pass
+
+
 def _format_missing_gtk_message() -> str:
     if sys.platform == "win32":
         return (
@@ -68,6 +82,7 @@ def _format_missing_gtk_message() -> str:
 def main():
     """Launch the Hosty application."""
     try:
+        _configure_windows_app_identity()
         _configure_frozen_gtk_environment()
         app = create_application()
         return app.run(sys.argv)
