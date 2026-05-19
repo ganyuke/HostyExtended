@@ -20,7 +20,7 @@ It keeps the full server workflow in one app: setup, start/stop, monitoring, mod
 [![Download on Flathub](https://flathub.org/assets/badges/flathub-badge-en.png)](https://flathub.org/en/apps/io.github.sugarycandybar.Hosty)
 
 - Linux: use the Flatpak release from [Flathub](https://flathub.org/en/apps/io.github.sugarycandybar.Hosty).
-- Windows: use the EXE release from GitHub Releases. (Note: The Windows version is currently a work in progress.)
+- Windows: run the same GTK frontend used on Linux.
 
 <details>
 <summary>Run from source (Python)</summary>
@@ -42,17 +42,23 @@ python3 hosty.py
 
 ### Windows
 
-1. Install Python dependencies:
+The Windows build uses the same GTK/libadwaita UI as Linux, so it needs a Python environment that already has PyGObject (`gi`), GTK4, and libadwaita.
+
+Recommended MSYS2 UCRT64 setup:
+
+```bash
+pacman -Suy
+pacman -S mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita
+```
+
+Then run these from the MSYS2 UCRT64 shell:
 
 ```bash
 python -m pip install -r requirements-windows.txt
-```
-
-2. Run Hosty:
-
-```bash
 python hosty.py
 ```
+
+Conda is also supported if the environment includes `pygobject` and `gtk4`.
 
 </details>
 

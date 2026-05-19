@@ -10,74 +10,99 @@ permissions:
 
 jobs:
   build-windows-exe:
-    name: Build Windows EXE
+    name: Build Windows GTK App
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup MSYS2 GTK environment
+        uses: msys2/setup-msys2@v2
         with:
-          python-version: "3.12"
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            zip
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pyinstaller
+            mingw-w64-ucrt-x86_64-python-requests
+            mingw-w64-ucrt-x86_64-python-psutil
+            mingw-w64-ucrt-x86_64-python-pillow
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-gsettings-desktop-schemas
 
       - name: Read app version
         id: version
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $version = python -c 'import ast; from pathlib import Path; tree = ast.parse(Path("hosty/version.py").read_text(encoding="utf-8")); print(next((node.value.value for node in tree.body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name) and target.id == "__version__" and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), ""))'
-          if (-not $version) {
-            Write-Error "__version__ not found"
+          VERSION=$(python -c "import ast; from pathlib import Path; tree = ast.parse(Path('hosty/version.py').read_text(encoding='utf-8')); print(next((node.value.value for node in tree.body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name) and target.id == '__version__' and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), ''))")
+          if [ -z "$VERSION" ]; then
+            echo "__version__ not found" >&2
             exit 1
-          }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate release tag matches app version
         if: github.event_name == 'release'
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $tag = "${{ github.event.release.tag_name }}"
-          function Normalize-Version([string]$value) {
-            $v = ($value ?? "").Trim()
-            $v = $v -replace '^[vV]', ''
-            if ($v -match '^\d+\.\d+$') {
-              return "$v.0"
-            }
-            if ($v -match '^\d+\.\d+\.\d+$') {
-              return $v
-            }
-            return $null
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          normalize_version() {
+            value="$1"
+            value="${value#v}"
+            value="${value#V}"
+            if [[ "$value" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              echo "$value.0"
+              return 0
+            fi
+            if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "$value"
+              return 0
+            fi
+            return 1
           }
 
-          $normalizedVersion = Normalize-Version $version
-          $normalizedTag = Normalize-Version $tag
-
-          if (-not $normalizedVersion -or -not $normalizedTag -or $normalizedTag -ne $normalizedVersion) {
-            Write-Error "Release tag '$tag' does not match app version '$version'"
+          if ! NORMALIZED_TAG="$(normalize_version "$TAG")" || ! NORMALIZED_VERSION="$(normalize_version "$VERSION")" || [ "$NORMALIZED_TAG" != "$NORMALIZED_VERSION" ]; then
+            echo "Release tag '$TAG' does not match app version '$VERSION'" >&2
             exit 1
-          }
+          fi
 
-      - name: Install dependencies
+      - name: Build portable GTK app
+        shell: msys2 {0}
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-windows.txt pyinstaller
+          pyinstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --name Hosty \
+            --collect-submodules gi \
+            --collect-submodules hosty \
+            --add-binary "/ucrt64/bin/libgtk-4-1.dll;." \
+            --add-binary "/ucrt64/bin/libadwaita-1-0.dll;." \
+            --add-data "/ucrt64/lib/girepository-1.0;lib/girepository-1.0" \
+            --add-data "/ucrt64/share/glib-2.0/schemas;share/glib-2.0/schemas" \
+            --add-data "/ucrt64/share/icons;share/icons" \
+            hosty.py
 
-      - name: Build EXE with PyInstaller
+      - name: Zip portable app
+        shell: msys2 {0}
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name Hosty --hidden-import hosty.ui.windows.application --collect-submodules hosty.ui.windows --collect-submodules hosty.backend --exclude-module gi --exclude-module hosty.application hosty.py
+          cd dist
+          zip -r "Hosty-${{ steps.version.outputs.version }}-windows-x86_64.zip" Hosty
 
-      - name: Rename EXE with version
-        shell: pwsh
-        run: |
-          Move-Item -Path "dist/Hosty.exe" -Destination "dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.exe"
-
-      - name: Upload EXE artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hosty-windows-exe-${{ steps.version.outputs.version }}
-          path: dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.exe
+          name: hosty-windows-${{ steps.version.outputs.version }}
+          path: dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.zip
 
   build-linux-flatpak:
     name: Build Linux Flatpak
@@ -171,5 +196,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/**/*.exe
+            release-assets/**/*.zip
             release-assets/**/*.flatpak
