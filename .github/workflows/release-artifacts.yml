@@ -115,8 +115,15 @@ jobs:
             --add-data "$APP_ICONS;icons" \
             hosty.py
 
-          BUNDLE_PIXBUF_LOADERS="$(cygpath -w "$(pwd)/dist/Hosty/lib/gdk-pixbuf-2.0/2.10.0/loaders")"
-          GDK_PIXBUF_MODULEDIR="$BUNDLE_PIXBUF_LOADERS" gdk-pixbuf-query-loaders > "dist/Hosty/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          BUNDLE_PIXBUF_DIR="$(find dist/Hosty -type d -path '*/gdk-pixbuf-2.0/2.10.0' | head -n 1)"
+          if [ -z "$BUNDLE_PIXBUF_DIR" ]; then
+            echo "Bundled gdk-pixbuf directory not found"
+            find dist/Hosty -maxdepth 5 -type d | sort
+            exit 1
+          fi
+
+          BUNDLE_PIXBUF_LOADERS="$(cygpath -w "$BUNDLE_PIXBUF_DIR/loaders")"
+          GDK_PIXBUF_MODULEDIR="$BUNDLE_PIXBUF_LOADERS" gdk-pixbuf-query-loaders > "$BUNDLE_PIXBUF_DIR/loaders.cache"
 
       - name: Zip portable app
         shell: msys2 {0}

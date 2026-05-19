@@ -25,24 +25,39 @@ def _configure_frozen_gtk_environment() -> None:
     if not getattr(sys, "frozen", False):
         return
 
-    bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    _prepend_env_path("PATH", bundle_dir)
+    exe_dir = Path(sys.executable).parent
+    bundle_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
+    bundle_dirs = [bundle_dir, exe_dir, exe_dir / "_internal"]
 
-    typelib_dir = bundle_dir / "lib" / "girepository-1.0"
+    _prepend_env_path("PATH", bundle_dir)
+    for candidate in bundle_dirs:
+        if candidate.exists():
+            _prepend_env_path("PATH", candidate)
+
+    typelib_dir = next(
+        (root / "lib" / "girepository-1.0" for root in bundle_dirs if (root / "lib" / "girepository-1.0").exists()),
+        bundle_dir / "lib" / "girepository-1.0",
+    )
     if typelib_dir.exists():
         _prepend_env_path("GI_TYPELIB_PATH", typelib_dir)
 
-    share_dir = bundle_dir / "share"
+    share_dir = next(
+        (root / "share" for root in bundle_dirs if (root / "share").exists()),
+        bundle_dir / "share",
+    )
     if share_dir.exists():
         _prepend_env_path("XDG_DATA_DIRS", share_dir)
-        os.environ.setdefault("GTK_DATA_PREFIX", str(bundle_dir))
-        os.environ.setdefault("GTK_EXE_PREFIX", str(bundle_dir))
+        os.environ.setdefault("GTK_DATA_PREFIX", str(share_dir.parent))
+        os.environ.setdefault("GTK_EXE_PREFIX", str(share_dir.parent))
 
     schemas_dir = share_dir / "glib-2.0" / "schemas"
     if schemas_dir.exists():
         os.environ.setdefault("GSETTINGS_SCHEMA_DIR", str(schemas_dir))
 
-    pixbuf_root = bundle_dir / "lib" / "gdk-pixbuf-2.0"
+    pixbuf_root = next(
+        (root / "lib" / "gdk-pixbuf-2.0" for root in bundle_dirs if (root / "lib" / "gdk-pixbuf-2.0").exists()),
+        bundle_dir / "lib" / "gdk-pixbuf-2.0",
+    )
     loaders_dir = pixbuf_root / "2.10.0" / "loaders"
     loaders_cache = pixbuf_root / "2.10.0" / "loaders.cache"
     if loaders_dir.exists():
