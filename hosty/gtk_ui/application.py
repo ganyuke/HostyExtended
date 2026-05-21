@@ -85,10 +85,17 @@ class HostyApplication(Adw.Application):
             except Exception:
                 pass
 
+            # Start the single-instance IPC listener so a second launch shows this window
+            from hosty.shared.utils.windows_instance import start_show_listener
+            start_show_listener(self._on_instance_show_requested)
+
             # Initialize and start the Windows system tray manager
             from hosty.shared.utils.tray_windows import WindowsTrayManager
             self._tray_manager = WindowsTrayManager(self)
-            self._tray_manager.start()
+            try:
+                self._tray_manager.start()
+            except Exception:
+                pass
     
     def do_activate(self):
         """Application activate - show the window."""
@@ -128,6 +135,10 @@ class HostyApplication(Adw.Application):
     
     def do_shutdown(self):
         """Application shutdown - stop all servers."""
+        if sys.platform == "win32":
+            from hosty.shared.utils.windows_instance import cleanup as cleanup_instance
+            cleanup_instance()
+
         if sys.platform == "win32" and hasattr(self, "_tray_manager") and self._tray_manager:
             self._tray_manager.stop()
             self._tray_manager = None
@@ -368,3 +379,13 @@ class HostyApplication(Adw.Application):
         
         dialog.connect("response", on_response)
         dialog.present(self._window)
+
+    def _on_instance_show_requested(self):
+        """Bring the window to front when signalled by a second instance."""
+        if not self._window:
+            return
+        if self._is_held_for_background:
+            self.release()
+            self._is_held_for_background = False
+        self._window.set_visible(True)
+        self._window.present()

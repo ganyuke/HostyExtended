@@ -7,7 +7,8 @@ from __future__ import annotations
 import io
 import sys
 from pathlib import Path
-from PIL import Image
+
+from PIL import Image, ImageDraw
 
 import pystray
 from gi.repository import GLib
@@ -26,36 +27,42 @@ class WindowsTrayManager:
         if self.icon is not None:
             return
 
-        # Load application icon
-        image = self._get_icon_image()
+        try:
+            image = self._get_icon_image()
 
-        # Define tray menu actions
-        menu = pystray.Menu(
-            pystray.MenuItem("Show Hosty", self._on_show, default=True),
-            pystray.MenuItem("Quit", self._on_quit),
-        )
+            menu = pystray.Menu(
+                pystray.MenuItem("Show Hosty", self._on_show, default=True),
+                pystray.MenuItem("Quit", self._on_quit),
+            )
 
-        self.icon = pystray.Icon(
-            "Hosty",
-            image,
-            title=self._status_message,
-            menu=menu,
-        )
+            self.icon = pystray.Icon(
+                "Hosty",
+                image,
+                title=self._status_message,
+                menu=menu,
+            )
 
-        # Start the pystray main loop in a background thread
-        self.icon.run_detached()
+            self.icon.run_detached()
+        except Exception as e:
+            print(f"Failed to start tray icon: {e}", file=sys.stderr)
 
     def stop(self) -> None:
         """Stop and remove the system tray icon."""
         if self.icon is not None:
-            self.icon.stop()
+            try:
+                self.icon.stop()
+            except Exception:
+                pass
             self.icon = None
 
     def set_status(self, message: str) -> None:
         """Update the tooltip of the tray icon."""
         self._status_message = f"Hosty - {message}" if message else "Hosty"
         if self.icon is not None:
-            self.icon.title = self._status_message
+            try:
+                self.icon.title = self._status_message
+            except Exception:
+                pass
 
     def _on_show(self, icon, item) -> None:
         """Callback from tray menu to show the window."""
@@ -76,32 +83,18 @@ class WindowsTrayManager:
         self.app.activate_action("quit", None)
 
     def _get_icon_image(self) -> Image.Image:
-        """Retrieve the Hosty SVG icon, rasterize it via GdkPixbuf, and load as PIL Image."""
+        """Try to load the Hosty SVG icon; fall back to a drawn PIL image."""
+        image = self._try_load_svg_icon()
+        if image is not None:
+            return image
+        return self._create_fallback_icon()
+
+    def _try_load_svg_icon(self) -> Image.Image | None:
+        """Attempt to load the Hosty SVG via GdkPixbuf and return a PIL Image."""
         try:
             from gi.repository import GdkPixbuf
-            svg_path = None
-
-            # 1. Check for bundled/frozen path candidates
-            if getattr(sys, "frozen", False):
-                bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-                candidates = [
-                    bundle_dir / "share" / "icons" / "hicolor" / "scalable" / "apps" / "io.github.sugarycandybar.Hosty.svg",
-                    bundle_dir / "icons" / "io.github.sugarycandybar.Hosty.svg",
-                    bundle_dir / "io.github.sugarycandybar.Hosty.svg",
-                ]
-                for candidate in candidates:
-                    if candidate.exists():
-                        svg_path = candidate
-                        break
-
-            # 2. Check for development path
-            if not svg_path:
-                dev_path = Path(__file__).resolve().parents[3] / "packaging" / "linux" / "io.github.sugarycandybar.Hosty.svg"
-                if dev_path.exists():
-                    svg_path = dev_path
-
+            svg_path = self._find_svg_path()
             if svg_path and svg_path.exists():
-                # Load the SVG at standard 32x32 size for system tray
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(svg_path), 32, 32, True)
                 res = pixbuf.save_to_bufferv("png", [], [])
                 if isinstance(res, tuple) and len(res) == 2:
@@ -109,7 +102,45 @@ class WindowsTrayManager:
                     if success:
                         return Image.open(io.BytesIO(buffer))
         except Exception as e:
-            print(f"Error loading SVG icon with GdkPixbuf: {e}", file=sys.stderr)
+            print(f"SVG icon load failed: {e}", file=sys.stderr)
+        return None
 
-        # Fallback image: a simple solid colored image with Hosty's branding color
-        return Image.new("RGBA", (32, 32), (46, 194, 126, 255))
+    def _find_svg_path(self) -> Path | None:
+        """Locate the Hosty SVG icon from bundled or development paths."""
+        if getattr(sys, "frozen", False):
+            bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+            candidates = [
+                bundle_dir / "share" / "icons" / "hicolor" / "scalable" / "apps" / "io.github.sugarycandybar.Hosty.svg",
+                bundle_dir / "icons" / "io.github.sugarycandybar.Hosty.svg",
+                bundle_dir / "io.github.sugarycandybar.Hosty.svg",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+
+        dev_path = Path(__file__).resolve().parents[3] / "packaging" / "linux" / "io.github.sugarycandybar.Hosty.svg"
+        if dev_path.exists():
+            return dev_path
+        return None
+
+    def _create_fallback_icon(self) -> Image.Image:
+        """Create a visible fallback icon with a green circle and 'H' letter."""
+        size = 64
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        draw.ellipse([2, 2, size - 2, size - 2], fill=(46, 194, 126, 255))
+
+        try:
+            from PIL import ImageFont
+            font = ImageFont.truetype("segoeui.ttf", 36)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((0, 0), "H", font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        tx = (size - tw) / 2 - bbox[0]
+        ty = (size - th) / 2 - bbox[1]
+        draw.text((tx, ty), "H", fill=(255, 255, 255, 255), font=font)
+
+        return img.resize((32, 32), Image.LANCZOS)
