@@ -20,7 +20,7 @@ It keeps the full server workflow in one app: setup, start/stop, monitoring, mod
 [![Download on Flathub](https://flathub.org/assets/badges/flathub-badge-en.png)](https://flathub.org/en/apps/io.github.sugarycandybar.Hosty)
 
 - Linux: use the Flatpak release from [Flathub](https://flathub.org/en/apps/io.github.sugarycandybar.Hosty).
-- Windows: run the same GTK frontend used on Linux.
+- Windows: Download from [GitHub Releases](https://github.com/sugarycandybar/Hosty/releases)
 
 <details>
 <summary>Run from source (Python)</summary>
