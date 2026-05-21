@@ -10,12 +10,11 @@ import tempfile
 import sys
 
 try:
-    if sys.platform != "win32":
-        import gi
-        gi.require_version('Gtk', '4.0')
-        gi.require_version('Gdk', '4.0')
-        gi.require_version('GdkPixbuf', '2.0')
-        from gi.repository import GdkPixbuf, Gdk, Gtk
+    import gi
+    gi.require_version('Gtk', '4.0')
+    gi.require_version('Gdk', '4.0')
+    gi.require_version('GdkPixbuf', '2.0')
+    from gi.repository import GdkPixbuf, Gdk, Gtk
 except ImportError:
     gi = None
     GdkPixbuf = None

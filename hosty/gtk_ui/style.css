@@ -41,23 +41,24 @@ button.playit-compact-button {
 .status-dot {
     min-width: 10px;
     min-height: 10px;
-    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
 }
 
 .status-dot.running {
-    background-color: #2ec27e;
+    color: #2ec27e;
 }
 
 .status-dot.starting {
-    background-color: #e5a50a;
+    color: #e5a50a;
 }
 
 .status-dot.stopping {
-    background-color: #e5a50a;
+    color: #e5a50a;
 }
 
 .status-dot.stopped {
-    background-color: alpha(currentColor, 0.3);
+    color: alpha(currentColor, 0.35);
 }
 
 /* ===== Status Pill ===== */

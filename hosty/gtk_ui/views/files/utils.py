@@ -31,6 +31,7 @@ from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
 
 from hosty.shared.backend.server_manager import ServerManager, ServerInfo
 from hosty.shared.utils.nbt_utils import get_world_seed as _world_seed
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
 __all__ = [
     "_open_uri",
@@ -60,7 +61,13 @@ def _open_uri(uri: str) -> bool:
 
     try:
         cmd = ["open", uri] if sys.platform == "darwin" else ["xdg-open", uri]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            **hidden_subprocess_kwargs(),
+        )
         return True
     except Exception:
         return False

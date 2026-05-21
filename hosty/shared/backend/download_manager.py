@@ -15,6 +15,7 @@ from hosty.shared.utils.constants import (
     FABRIC_INSTALLER_VERSIONS_URL,
     CACHE_DIR,
 )
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
 MOJANG_VERSION_MANIFEST = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 
@@ -289,6 +290,7 @@ class DownloadManager:
                 text=True,
                 timeout=300,
                 cwd=server_dir,
+                **hidden_subprocess_kwargs(),
             )
             
             if result.returncode == 0:

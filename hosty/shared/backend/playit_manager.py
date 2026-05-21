@@ -22,6 +22,7 @@ import requests
 
 from hosty.shared.core.events import EventEmitter
 from hosty.shared.utils.constants import DATA_DIR
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
 try:
     import tomlkit
@@ -345,6 +346,7 @@ class PlayitManager(EventEmitter):
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=8,
+                **hidden_subprocess_kwargs(),
             )
             output = (result.stdout or "").strip()
             if not output:
@@ -393,6 +395,7 @@ class PlayitManager(EventEmitter):
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=6,
+                **hidden_subprocess_kwargs(),
             )
             text = (result.stdout or "").strip()
             match = VERSION_RE.search(text)
@@ -851,8 +854,7 @@ class PlayitManager(EventEmitter):
             "bufsize": 1,
             "env": os.environ.copy(),
         }
-        if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        popen_kwargs.update(hidden_subprocess_kwargs())
 
         try:
             self._process = subprocess.Popen(cmd, **popen_kwargs)

@@ -23,6 +23,7 @@ from gi.repository import Gtk, Adw, Gdk, GLib
 
 from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
 from hosty.shared.backend.server_manager import ServerInfo, ServerManager
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
 
 
@@ -53,7 +54,13 @@ def _open_uri(uri: str) -> bool:
 
     try:
         cmd = ["open", uri] if sys.platform == "darwin" else ["xdg-open", uri]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            **hidden_subprocess_kwargs(),
+        )
         return True
     except Exception:
         return False

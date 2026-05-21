@@ -17,6 +17,7 @@ import requests
 from hosty.shared.utils.constants import (
     JRES_DIR, get_adoptium_jre_download_info, get_required_java_version
 )
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
 
 class JavaManager:
@@ -38,7 +39,8 @@ class JavaManager:
         try:
             result = subprocess.run(
                 ["java", "-version"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, timeout=10,
+                **hidden_subprocess_kwargs(),
             )
             output = result.stderr + result.stdout
             match = re.search(r'version "([\d\.]+)', output)

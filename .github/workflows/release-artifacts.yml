@@ -10,87 +10,47 @@ permissions:
 
 jobs:
   build-windows-exe:
-    name: Build Windows EXE
+    name: Build Windows GTK App
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup MSYS2 GTK environment
+        uses: msys2/setup-msys2@v2
         with:
-          python-version: "3.12"
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            zip
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-python-requests
+            mingw-w64-ucrt-x86_64-python-psutil
+            mingw-w64-ucrt-x86_64-python-pillow
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gdk-pixbuf2
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-webp-pixbuf-loader
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-gsettings-desktop-schemas
+
+      - name: Install PyInstaller
+        shell: msys2 {0}
+        run: |
+          python -m pip install --upgrade pyinstaller
 
       - name: Read app version
         id: version
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $version = python -c 'import ast; from pathlib import Path; tree = ast.parse(Path("hosty/version.py").read_text(encoding="utf-8")); print(next((node.value.value for node in tree.body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name) and target.id == "__version__" and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), ""))'
-          if (-not $version) {
-            Write-Error "__version__ not found"
-            exit 1
-          }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Validate release tag matches app version
-        if: github.event_name == 'release'
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $tag = "${{ github.event.release.tag_name }}"
-          function Normalize-Version([string]$value) {
-            $v = ($value ?? "").Trim()
-            $v = $v -replace '^[vV]', ''
-            if ($v -match '^\d+\.\d+$') {
-              return "$v.0"
-            }
-            if ($v -match '^\d+\.\d+\.\d+$') {
-              return $v
-            }
-            return $null
-          }
-
-          $normalizedVersion = Normalize-Version $version
-          $normalizedTag = Normalize-Version $tag
-
-          if (-not $normalizedVersion -or -not $normalizedTag -or $normalizedTag -ne $normalizedVersion) {
-            Write-Error "Release tag '$tag' does not match app version '$version'"
-            exit 1
-          }
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-windows.txt pyinstaller
-
-      - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name Hosty --hidden-import hosty.ui.windows.application --collect-submodules hosty.ui.windows --collect-submodules hosty.backend --exclude-module gi --exclude-module hosty.application hosty.py
-
-      - name: Rename EXE with version
-        shell: pwsh
-        run: |
-          Move-Item -Path "dist/Hosty.exe" -Destination "dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.exe"
-
-      - name: Upload EXE artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hosty-windows-exe-${{ steps.version.outputs.version }}
-          path: dist/Hosty-${{ steps.version.outputs.version }}-windows-x86_64.exe
-
-  build-linux-flatpak:
-    name: Build Linux Flatpak
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read app version
-        id: version
-        run: |
-          VERSION=$(python3 -c "import re; from pathlib import Path; text = Path('hosty/version.py').read_text(encoding='utf-8'); match = re.search(r'^__version__\\s*=\\s*\"([^\"]+)\"', text, re.MULTILINE); print(match.group(1) if match else '')")
+          VERSION=$(python -c "import ast; from pathlib import Path; tree = ast.parse(Path('hosty/version.py').read_text(encoding='utf-8')); print(next((node.value.value for node in tree.body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name) and target.id == '__version__' and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), ''))")
           if [ -z "$VERSION" ]; then
             echo "__version__ not found" >&2
             exit 1
@@ -99,6 +59,7 @@ jobs:
 
       - name: Validate release tag matches app version
         if: github.event_name == 'release'
+        shell: msys2 {0}
         run: |
           TAG="${{ github.event.release.tag_name }}"
           VERSION="${{ steps.version.outputs.version }}"
@@ -123,53 +84,121 @@ jobs:
             exit 1
           fi
 
-      - name: Install Flatpak tooling and GNOME SDK
+      - name: Build portable GTK app
+        shell: msys2 {0}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          # Install GNOME SDK and Platform 50 required by the manifest
-          flatpak --user install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50
+          GI_TYPELIBS="$(cygpath -w /ucrt64/lib/girepository-1.0)"
+          GLIB_SCHEMAS="$(cygpath -w /ucrt64/share/glib-2.0/schemas)"
+          ICONS="$(cygpath -w /ucrt64/share/icons)"
+          PIXBUF_LOADERS="$(cygpath -w /ucrt64/lib/gdk-pixbuf-2.0)"
+          APP_ICONS="$(cygpath -w packaging/linux)"
+          HOSTY_CSS="$(cygpath -w hosty/gtk_ui/style.css)"
 
-      - name: Cache Flatpak downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local/share/flatpak
-            ~/.var/app
-          key: ${{ runner.os }}-flatpak-sdk-50-${{ hashFiles('packaging/flatpak/**') }}
-          restore-keys: |
-            ${{ runner.os }}-flatpak-sdk-50-
+          mkdir -p build
+          rsvg-convert -w 256 -h 256 packaging/linux/io.github.sugarycandybar.Hosty.svg -o build/Hosty.png
+          python - <<'PY'
+          from PIL import Image
+          img = Image.open("build/Hosty.png")
+          img.save("build/Hosty.ico", sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+          PY
 
-      - name: Build Flatpak bundle
+          pyinstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --name Hosty \
+            --icon build/Hosty.ico \
+            --collect-submodules gi \
+            --collect-submodules hosty \
+            --add-data "$GI_TYPELIBS;lib/girepository-1.0" \
+            --add-data "$GLIB_SCHEMAS;share/glib-2.0/schemas" \
+            --add-data "$ICONS;share/icons" \
+            --add-data "$PIXBUF_LOADERS;lib/gdk-pixbuf-2.0" \
+            --add-data "$APP_ICONS;icons" \
+            --add-data "$HOSTY_CSS;hosty/gtk_ui" \
+            hosty.py
+
+          BUNDLE_PIXBUF_DIR="$(find dist/Hosty -type d -path '*/gdk-pixbuf-2.0/2.10.0' | head -n 1)"
+          if [ -z "$BUNDLE_PIXBUF_DIR" ]; then
+            echo "Bundled gdk-pixbuf directory not found"
+            find dist/Hosty -maxdepth 5 -type d | sort
+            exit 1
+          fi
+
+          BUNDLE_PIXBUF_LOADERS="$(cygpath -w "$BUNDLE_PIXBUF_DIR/loaders")"
+          GDK_PIXBUF_MODULEDIR="$BUNDLE_PIXBUF_LOADERS" gdk-pixbuf-query-loaders > "$BUNDLE_PIXBUF_DIR/loaders.cache"
+
+      - name: Sign Windows app and build installer
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          flatpak-builder --user --force-clean --default-branch=stable --repo=repo build-dir packaging/flatpak/io.github.sugarycandybar.Hosty.yml
-          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo repo "Hosty-${{ steps.version.outputs.version }}-x86_64.flatpak" io.github.sugarycandybar.Hosty stable --arch=x86_64
+          $hasCert = $env:WINDOWS_CODESIGN_PFX_BASE64 -and $env:WINDOWS_CODESIGN_PASSWORD
+          if ($hasCert) {
+            $certPath = Join-Path $env:RUNNER_TEMP "hosty-codesign.pfx"
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+            
+            Write-Host "Signing Hosty.exe..."
+            signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_CODESIGN_PASSWORD "dist/Hosty/Hosty.exe"
+            signtool verify /pa /v "dist/Hosty/Hosty.exe"
+          } else {
+            Write-Host "Code signing secrets are not configured; skipping Hosty.exe signing."
+          }
 
-      - name: Upload Flatpak artifact
+          Write-Host "Compiling Inno Setup installer..."
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+          if (-not $iscc) {
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          Write-Host "Using ISCC compiler at: $iscc"
+          & $iscc /DAppVersion=$env:APP_VERSION packaging/windows/hosty.iss
+
+          if ($hasCert) {
+            Write-Host "Signing installer..."
+            $installerPath = "dist/Hosty-$($env:APP_VERSION)-Setup.exe"
+            signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_CODESIGN_PASSWORD $installerPath
+            signtool verify /pa /v $installerPath
+            Remove-Item -LiteralPath $certPath -Force
+          } else {
+            Write-Host "Code signing secrets are not configured; skipping installer signing."
+          }
+
+      - name: Upload Windows portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hosty-linux-flatpak
-          path: ./*.flatpak
+          name: hosty-windows-portable-${{ steps.version.outputs.version }}
+          path: dist/Hosty
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosty-windows-installer-${{ steps.version.outputs.version }}
+          path: dist/Hosty-${{ steps.version.outputs.version }}-Setup.exe
+
 
   upload-release-assets:
     name: Upload assets to GitHub Release
     runs-on: ubuntu-latest
-    needs:
-      - build-windows-exe
-      - build-linux-flatpak
+    needs: build-windows-exe
     if: github.event_name == 'release'
 
     steps:
-      - name: Download all artifacts
+      - name: Download installer artifact
         uses: actions/download-artifact@v4
         with:
+          name: hosty-windows-installer-${{ needs.build-windows-exe.outputs.version }}
           path: release-assets
-          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          VERSION="${{ needs.build-windows-exe.outputs.version }}"
+          mv release-assets/Hosty-$VERSION-Setup.exe .
 
       - name: Upload assets to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/**/*.exe
-            release-assets/**/*.flatpak
+            Hosty-*-Setup.exe

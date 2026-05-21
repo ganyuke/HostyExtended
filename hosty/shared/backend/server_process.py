@@ -12,6 +12,7 @@ from typing import Optional
 
 from hosty.shared.utils.constants import ServerStatus
 from hosty.shared.core.events import EventEmitter
+from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
 
 class ServerProcess(EventEmitter):
@@ -93,8 +94,7 @@ class ServerProcess(EventEmitter):
                 "text": True,
                 "bufsize": 1,
             }
-            if sys.platform == "win32":
-                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            popen_kwargs.update(hidden_subprocess_kwargs())
 
             self._process = subprocess.Popen(cmd, **popen_kwargs)
             self._pid = self._process.pid

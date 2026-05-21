@@ -1,11 +1,11 @@
 """
 PerformanceView - Server performance monitoring (CPU, RAM, TPS).
 """
-import math
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
+import cairo
 
 try:
     import psutil
@@ -17,16 +17,15 @@ from hosty.shared.backend.server_process import ServerProcess
 
 
 class SparklineWidget(Gtk.DrawingArea):
-    """A small sparkline chart widget drawn with Cairo."""
+    """A small sparkline chart widget rendered natively using Cairo."""
     
     def __init__(self, color_rgb=(0.22, 0.53, 0.91), max_points=60):
         super().__init__()
         self._data = [0.0] * max_points
         self._max_points = max_points
         self._color = color_rgb
-        # Keep sparkline background transparent and draw custom tint in Cairo.
         self.add_css_class("sparkline")
-        self.set_draw_func(self._draw)
+        self.set_draw_func(self._draw_func, None)
     
     def add_value(self, value):
         self._data.pop(0)
@@ -36,51 +35,40 @@ class SparklineWidget(Gtk.DrawingArea):
     def clear(self):
         self._data = [0.0] * self._max_points
         self.queue_draw()
-        
-    def _draw(self, area, cr, width, height):
+
+    def _draw_func(self, area, cr, width, height, user_data):
         r, g, b = self._color
         
-        # Clip top corners to match Adwaita card styling
-        radius = 12
-        cr.new_path()
-        cr.move_to(0, radius)
-        cr.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
-        cr.line_to(width - radius, 0)
-        cr.arc(width - radius, radius, radius, 1.5 * math.pi, 2 * math.pi)
-        cr.line_to(width, height)
-        cr.line_to(0, height)
-        cr.close_path()
-        cr.clip()
-        
-        # Tinted background matching the metric's specific color
-        cr.set_source_rgba(r, g, b, 0.08)
-        cr.rectangle(0, 0, width, height)
-        cr.fill()
-        
-        # Filled area under the line
-        cr.set_source_rgba(r, g, b, 0.25)
-        cr.move_to(0, height)
-        
-        for i, val in enumerate(self._data):
-            x = (i / (self._max_points - 1)) * width
-            y = height - 1.5 - (val / 100.0) * (height * 0.95 - 2)
-            cr.line_to(x, y)
-            
-        cr.line_to(width, height)
-        cr.close_path()
-        cr.fill()
-        
-        # The line stroke (always visible even at 0)
-        cr.set_source_rgba(r, g, b, 1.0)
-        cr.set_line_width(2)
-        cr.move_to(0, height - 1.5 - (self._data[0] / 100.0) * (height * 0.95 - 2))
-        
-        for i, val in enumerate(self._data):
-            x = (i / (self._max_points - 1)) * width
-            y = height - 1.5 - (val / 100.0) * (height * 0.95 - 2)
-            cr.line_to(x, y)
-            
-        cr.stroke()
+        # 1. Fill background with subtle alpha
+        cr.set_source_rgba(r, g, b, 20.0 / 255.0)
+        cr.paint()
+
+        denom = max(1, self._max_points - 1)
+        points = []
+        for i, value in enumerate(self._data):
+            x = (i / denom) * (width - 1)
+            y = height - 3 - (max(0.0, min(100.0, value)) / 100.0) * (height - 8)
+            points.append((x, y))
+
+        if points:
+            # 2. Fill the polygon under the line
+            cr.move_to(0, height)
+            for x, y in points:
+                cr.line_to(x, y)
+            cr.line_to(width, height)
+            cr.close_path()
+            cr.set_source_rgba(r, g, b, 58.0 / 255.0)
+            cr.fill()
+
+            # 3. Draw the line on top
+            cr.move_to(points[0][0], points[0][1])
+            for x, y in points[1:]:
+                cr.line_to(x, y)
+            cr.set_source_rgba(r, g, b, 1.0)
+            cr.set_line_width(3.0)
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.stroke()
 
 
 class MetricCard(Gtk.Box):

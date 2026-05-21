@@ -3,6 +3,7 @@ HostyApplication - Main Adw.Application subclass.
 Handles app lifecycle, actions, CSS loading, and dialog management.
 """
 import shutil
+import sys
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -29,6 +30,7 @@ class HostyApplication(Adw.Application):
         self._window = None
         self._activate_in_background = False
         self._is_held_for_background = False
+        self._tray_manager = None
     
     def do_command_line(self, command_line):
         """Handle command line arguments."""
@@ -54,6 +56,46 @@ class HostyApplication(Adw.Application):
         
         # Setup actions
         self._setup_actions()
+
+        if sys.platform == "win32":
+            # Synchronize Windows registry startup run key with preferences
+            try:
+                import winreg
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                app_name = "Hosty"
+                autostart = self._server_manager.preferences.open_on_startup
+                if autostart:
+                    if getattr(sys, "frozen", False):
+                        cmd = f'"{sys.executable}" --background'
+                    else:
+                        cmd = f'"{sys.executable}" "{Path(sys.argv[0]).resolve()}" --background'
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
+                    winreg.CloseKey(key)
+                else:
+                    try:
+                        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                        try:
+                            winreg.DeleteValue(key, app_name)
+                        except FileNotFoundError:
+                            pass
+                        winreg.CloseKey(key)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Start the single-instance IPC listener so a second launch shows this window
+            from hosty.shared.utils.windows_instance import start_show_listener
+            start_show_listener(self._on_instance_show_requested)
+
+            # Initialize and start the Windows system tray manager
+            from hosty.shared.utils.tray_windows import WindowsTrayManager
+            self._tray_manager = WindowsTrayManager(self)
+            try:
+                self._tray_manager.start()
+            except Exception:
+                pass
     
     def do_activate(self):
         """Application activate - show the window."""
@@ -93,6 +135,14 @@ class HostyApplication(Adw.Application):
     
     def do_shutdown(self):
         """Application shutdown - stop all servers."""
+        if sys.platform == "win32":
+            from hosty.shared.utils.windows_instance import cleanup as cleanup_instance
+            cleanup_instance()
+
+        if sys.platform == "win32" and hasattr(self, "_tray_manager") and self._tray_manager:
+            self._tray_manager.stop()
+            self._tray_manager = None
+
         if self._window:
             self._window.shutdown_background()
         if self._server_manager:
@@ -114,17 +164,24 @@ class HostyApplication(Adw.Application):
             )
 
     def _register_packaged_icons(self):
-        """Ensure packaged app icons are discoverable in development runs."""
+        """Ensure app icons are discoverable in development and frozen runs."""
         display = Gdk.Display.get_default()
         if not display:
             return
 
-        icon_dir = Path(__file__).resolve().parents[2] / "packaging" / "linux"
-        if not icon_dir.exists():
-            return
-
         icon_theme = Gtk.IconTheme.get_for_display(display)
-        icon_theme.add_search_path(str(icon_dir))
+
+        candidates = []
+        if getattr(sys, "frozen", False):
+            bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+            candidates.append(bundle_dir / "share" / "icons")
+            candidates.append(bundle_dir / "icons")
+
+        candidates.append(Path(__file__).resolve().parents[2] / "packaging" / "linux")
+
+        for icon_dir in candidates:
+            if icon_dir.exists():
+                icon_theme.add_search_path(str(icon_dir))
     
     def _setup_actions(self):
         """Register application actions."""
@@ -322,3 +379,13 @@ class HostyApplication(Adw.Application):
         
         dialog.connect("response", on_response)
         dialog.present(self._window)
+
+    def _on_instance_show_requested(self):
+        """Bring the window to front when signalled by a second instance."""
+        if not self._window:
+            return
+        if self._is_held_for_background:
+            self.release()
+            self._is_held_for_background = False
+        self._window.set_visible(True)
+        self._window.present()

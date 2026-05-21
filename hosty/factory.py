@@ -1,8 +1,7 @@
-"""Platform-aware application factory for Hosty frontends."""
+"""Application factory for Hosty's GTK frontend."""
 
 from __future__ import annotations
 
-import sys
 from typing import Protocol
 
 
@@ -14,12 +13,7 @@ class HostyApp(Protocol):
 
 
 def create_application() -> HostyApp:
-    """Create the appropriate frontend for the current platform."""
-    if sys.platform == "win32":
-        from hosty.qt_ui.application import HostyWindowsApplication
-
-        return HostyWindowsApplication()
-
+    """Create the GTK frontend."""
     from hosty.gtk_ui.application import HostyApplication
 
     return HostyApplication()
