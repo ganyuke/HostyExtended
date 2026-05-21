@@ -1,3 +1,4 @@
+import sys
 import uuid
 from gi.repository import Gio, GLib
 
@@ -12,6 +13,37 @@ def request_background(autostart: bool, callback: callable) -> None:
     Request background permission via xdg-desktop-portal.
     callback gets: (success: bool, background_granted: bool, autostart_granted: bool, error_msg: str)
     """
+    if sys.platform == "win32":
+        try:
+            import winreg
+            from pathlib import Path
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            app_name = "Hosty"
+
+            if autostart:
+                if getattr(sys, "frozen", False):
+                    cmd = f'"{sys.executable}" --background'
+                else:
+                    cmd = f'"{sys.executable}" "{Path(sys.argv[0]).resolve()}" --background'
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
+                winreg.CloseKey(key)
+            else:
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                    try:
+                        winreg.DeleteValue(key, app_name)
+                    except FileNotFoundError:
+                        pass
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
+
+            callback(True, True, autostart, "")
+        except Exception as e:
+            callback(False, False, False, str(e))
+        return
+
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     except Exception as e:
@@ -101,6 +133,15 @@ def request_background(autostart: bool, callback: callable) -> None:
 
 def set_background_status(message: str) -> None:
     """Set the background status message."""
+    if sys.platform == "win32":
+        try:
+            app = Gio.Application.get_default()
+            if app and hasattr(app, "_tray_manager") and app._tray_manager:
+                app._tray_manager.set_status(message)
+        except Exception:
+            pass
+        return
+
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         bus.call(

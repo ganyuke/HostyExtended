@@ -30,6 +30,7 @@ class HostyApplication(Adw.Application):
         self._window = None
         self._activate_in_background = False
         self._is_held_for_background = False
+        self._tray_manager = None
     
     def do_command_line(self, command_line):
         """Handle command line arguments."""
@@ -55,6 +56,39 @@ class HostyApplication(Adw.Application):
         
         # Setup actions
         self._setup_actions()
+
+        if sys.platform == "win32":
+            # Synchronize Windows registry startup run key with preferences
+            try:
+                import winreg
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                app_name = "Hosty"
+                autostart = self._server_manager.preferences.open_on_startup
+                if autostart:
+                    if getattr(sys, "frozen", False):
+                        cmd = f'"{sys.executable}" --background'
+                    else:
+                        cmd = f'"{sys.executable}" "{Path(sys.argv[0]).resolve()}" --background'
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
+                    winreg.CloseKey(key)
+                else:
+                    try:
+                        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                        try:
+                            winreg.DeleteValue(key, app_name)
+                        except FileNotFoundError:
+                            pass
+                        winreg.CloseKey(key)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Initialize and start the Windows system tray manager
+            from hosty.shared.utils.tray_windows import WindowsTrayManager
+            self._tray_manager = WindowsTrayManager(self)
+            self._tray_manager.start()
     
     def do_activate(self):
         """Application activate - show the window."""
@@ -94,6 +128,10 @@ class HostyApplication(Adw.Application):
     
     def do_shutdown(self):
         """Application shutdown - stop all servers."""
+        if sys.platform == "win32" and hasattr(self, "_tray_manager") and self._tray_manager:
+            self._tray_manager.stop()
+            self._tray_manager = None
+
         if self._window:
             self._window.shutdown_background()
         if self._server_manager:
