@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
-from PIL import Image, ImageDraw
+import cairo
 
 try:
     import psutil
@@ -16,8 +16,8 @@ except ImportError:
 from hosty.shared.backend.server_process import ServerProcess
 
 
-class SparklineWidget(Gtk.Picture):
-    """A small sparkline chart widget rendered as a texture."""
+class SparklineWidget(Gtk.DrawingArea):
+    """A small sparkline chart widget rendered natively using Cairo."""
     
     def __init__(self, color_rgb=(0.22, 0.53, 0.91), max_points=60):
         super().__init__()
@@ -25,49 +25,50 @@ class SparklineWidget(Gtk.Picture):
         self._max_points = max_points
         self._color = color_rgb
         self.add_css_class("sparkline")
-        self.set_content_fit(Gtk.ContentFit.FILL)
-        self._render()
+        self.set_draw_func(self._draw_func, None)
     
     def add_value(self, value):
         self._data.pop(0)
         self._data.append(value)
-        self._render()
+        self.queue_draw()
     
     def clear(self):
         self._data = [0.0] * self._max_points
-        self._render()
-        
-    def _rgba(self, alpha: int) -> tuple[int, int, int, int]:
+        self.queue_draw()
+
+    def _draw_func(self, area, cr, width, height, user_data):
         r, g, b = self._color
-        return (int(r * 255), int(g * 255), int(b * 255), alpha)
+        
+        # 1. Fill background with subtle alpha
+        cr.set_source_rgba(r, g, b, 20.0 / 255.0)
+        cr.paint()
 
-    def _render(self):
-        width = 720
-        height = 120
-        image = Image.new("RGBA", (width, height), self._rgba(20))
-        draw = ImageDraw.Draw(image, "RGBA")
-
-        points = []
         denom = max(1, self._max_points - 1)
+        points = []
         for i, value in enumerate(self._data):
-            x = int((i / denom) * (width - 1))
-            y = int(height - 3 - (max(0.0, min(100.0, value)) / 100.0) * (height - 8))
+            x = (i / denom) * (width - 1)
+            y = height - 3 - (max(0.0, min(100.0, value)) / 100.0) * (height - 8)
             points.append((x, y))
 
         if points:
-            fill_points = [(0, height)] + points + [(width, height)]
-            draw.polygon(fill_points, fill=self._rgba(58))
-            draw.line(points, fill=self._rgba(255), width=3, joint="curve")
+            # 2. Fill the polygon under the line
+            cr.move_to(0, height)
+            for x, y in points:
+                cr.line_to(x, y)
+            cr.line_to(width, height)
+            cr.close_path()
+            cr.set_source_rgba(r, g, b, 58.0 / 255.0)
+            cr.fill()
 
-        data = GLib.Bytes.new(image.tobytes("raw", "RGBA"))
-        texture = Gdk.MemoryTexture.new(
-            width,
-            height,
-            Gdk.MemoryFormat.R8G8B8A8,
-            data,
-            width * 4,
-        )
-        self.set_paintable(texture)
+            # 3. Draw the line on top
+            cr.move_to(points[0][0], points[0][1])
+            for x, y in points[1:]:
+                cr.line_to(x, y)
+            cr.set_source_rgba(r, g, b, 1.0)
+            cr.set_line_width(3.0)
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.stroke()
 
 
 class MetricCard(Gtk.Box):
