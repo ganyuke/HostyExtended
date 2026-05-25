@@ -45,6 +45,11 @@
   <url type="bugtracker">https://github.com/sugarycandybar/Hosty/issues</url>
   <url type="vcs-browser">https://github.com/sugarycandybar/Hosty</url>
   <releases>
+    <release version="1.7.3" date="2026-05-24">
+      <description>
+        <p>Playit agent fix</p>
+      </description>
+    </release>
     <release version="1.7.2" date="2026-05-21">
       <description>
         <p>Ported to windows</p>
