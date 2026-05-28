@@ -399,14 +399,11 @@ class PlayitManager(EventEmitter):
                 **hidden_subprocess_kwargs(),
             )
             text = (result.stdout or "").strip()
-            print(f"[PLAYIT DEBUG] Version output (v1.x style): {text}")
             match = VERSION_RE.search(text)
             if match:
                 version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-                print(f"[PLAYIT DEBUG] Parsed version: {version}")
                 return version
         except Exception as e:
-            print(f"[PLAYIT DEBUG] v1.x version detection failed: {e}")
             pass
         
         # Try old style: playit --version
@@ -420,24 +417,19 @@ class PlayitManager(EventEmitter):
                 **hidden_subprocess_kwargs(),
             )
             text = (result.stdout or "").strip()
-            print(f"[PLAYIT DEBUG] Version output (old style): {text}")
             match = VERSION_RE.search(text)
             if match:
                 version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-                print(f"[PLAYIT DEBUG] Parsed version: {version}")
                 return version
         except Exception as e:
-            print(f"[PLAYIT DEBUG] Old style version detection failed: {e}")
             pass
         
-        print(f"[PLAYIT DEBUG] Using default version 0.17.1")
         return 0, 17, 1
 
     def _is_incompatible_version(self, binary: str) -> bool:
         """Check if binary version is 1.x (incompatible with subprocess approach)."""
         major, minor, patch = self._detect_version(binary)
         is_incompatible = major >= 1
-        print(f"[PLAYIT DEBUG] Version check: {major}.{minor}.{patch} -> incompatible={is_incompatible}")
         return is_incompatible
 
     def _download_specific_version(self, version_tag: str) -> tuple[bool, str]:
@@ -963,12 +955,9 @@ class PlayitManager(EventEmitter):
 
         # Check if current binary is v1.x (incompatible) and downgrade to v0.17.1
         if binary and self._is_incompatible_version(binary):
-            print(f"[PLAYIT DEBUG] Detected v1.x binary in start(), attempting downgrade to v0.17.1")
             ok, msg = self._download_specific_version("v0.17.1")
-            print(f"[PLAYIT DEBUG] Downgrade result: ok={ok}, msg={msg}")
             if ok:
                 binary = self.resolve_binary()
-                print(f"[PLAYIT DEBUG] New binary path: {binary}")
             else:
                 return False, f"Failed to downgrade playit to v0.17.1: {msg}"
 
@@ -1053,12 +1042,9 @@ class PlayitManager(EventEmitter):
 
         # Check if current binary is v1.x (incompatible) and downgrade to v0.17.1
         if binary and self._is_incompatible_version(binary):
-            print(f"[PLAYIT DEBUG] Detected v1.x binary in regenerate_domain(), attempting downgrade to v0.17.1")
             ok, msg = self._download_specific_version("v0.17.1")
-            print(f"[PLAYIT DEBUG] Downgrade result: ok={ok}, msg={msg}")
             if ok:
                 binary = self.resolve_binary()
-                print(f"[PLAYIT DEBUG] New binary path: {binary}")
             else:
                 return False, f"Failed to downgrade playit to v0.17.1: {msg}"
 
@@ -1123,12 +1109,9 @@ class PlayitManager(EventEmitter):
 
         # Check if current binary is v1.x (incompatible) and downgrade to v0.17.1
         if binary and self._is_incompatible_version(binary):
-            print(f"[PLAYIT DEBUG] Detected v1.x binary in _ensure_api_ready(), attempting downgrade to v0.17.1")
             ok, msg = self._download_specific_version("v0.17.1")
-            print(f"[PLAYIT DEBUG] Downgrade result: ok={ok}, msg={msg}")
             if ok:
                 binary = self.resolve_binary()
-                print(f"[PLAYIT DEBUG] New binary path: {binary}")
             else:
                 return False, f"Failed to downgrade playit to v0.17.1: {msg}"
 

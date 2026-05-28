@@ -374,7 +374,7 @@ class PlayitMixin:
         self._voicechat_tunnel_action_btn.set_sensitive(not tunnel_actions_locked)
 
         if self._start_in_progress:
-            self._tunnel_btn.set_label("Starting Agent...")
+            self._tunnel_btn.set_label("Starting...")
             self._tunnel_btn.set_sensitive(False)
             self._tunnel_btn.add_css_class("hosty-starting-button")
         elif self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress:
@@ -1137,6 +1137,7 @@ class PlayitMixin:
             self._toast("A tunnel operation is already in progress")
             return
         if self._start_in_progress:
+            self._refresh_status_row()
             self._toast("Playit startup is already in progress")
             return
 
@@ -1145,6 +1146,7 @@ class PlayitMixin:
         server_dir = str(self._server_info.server_dir)
         secret = str(self._cfg.get("secret", "")).strip()
         self._start_in_progress = True
+        self._refresh_status_row()
 
         def worker():
             playit = self._server_manager.playit_manager
