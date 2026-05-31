@@ -28,8 +28,6 @@ It keeps the full server workflow in one app: setup, start/stop, monitoring, mod
 
 - Linux: use the Flatpak release from [Flathub](https://flathub.org/en/apps/io.github.sugarycandybar.Hosty).
 - Windows: Download from [GitHub Releases](https://github.com/sugarycandybar/Hosty/releases)
-### Code Signing
-Windows binaries are securely code-signed for free by the [SignPath Foundation](https://signpath.org/).
 
 <details>
 <summary>Run from source (Python)</summary>
