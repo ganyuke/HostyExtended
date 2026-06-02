@@ -2,19 +2,18 @@
 Image utility functions for Hosty.
 Handles image cropping, conversion, and loading for GTK display.
 """
+
 from __future__ import annotations
-from pathlib import Path
+
 from PIL import Image
-import io
-import tempfile
-import sys
 
 try:
     import gi
-    gi.require_version('Gtk', '4.0')
-    gi.require_version('Gdk', '4.0')
-    gi.require_version('GdkPixbuf', '2.0')
-    from gi.repository import GdkPixbuf, Gdk, Gtk
+
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Gdk", "4.0")
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import Gdk, GdkPixbuf, Gtk
 except ImportError:
     gi = None
     GdkPixbuf = None
@@ -30,23 +29,22 @@ def crop_to_square(input_path: str, x: int, y: int, size: int) -> Image.Image:
     return cropped
 
 
-def convert_to_png(input_path: str, output_path: str, size: int = 128,
-                   crop_box: tuple = None) -> str:
+def convert_to_png(input_path: str, output_path: str, size: int = 128, crop_box: tuple = None) -> str:
     """
     Convert an image to PNG format, optionally cropping and resizing.
-    
+
     Args:
         input_path: Path to the source image.
         output_path: Path to save the PNG.
         size: Output size (square).
         crop_box: Optional (x, y, width, height) crop region.
-    
+
     Returns:
         The output_path.
     """
     img = Image.open(input_path)
     img = img.convert("RGBA")
-    
+
     if crop_box:
         x, y, w, h = crop_box
         img = img.crop((x, y, x + w, y + h))
@@ -57,7 +55,7 @@ def convert_to_png(input_path: str, output_path: str, size: int = 128,
         left = (w - min_dim) // 2
         top = (h - min_dim) // 2
         img = img.crop((left, top, left + min_dim, top + min_dim))
-    
+
     img = img.resize((size, size), Image.Resampling.LANCZOS)
     img.save(output_path, "PNG")
     return output_path
@@ -68,9 +66,7 @@ def load_pixbuf(path: str, size: int = 128) -> GdkPixbuf.Pixbuf | None:
     if GdkPixbuf is None:
         return None
     try:
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            str(path), size, size, True
-        )
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), size, size, True)
         return pixbuf
     except Exception:
         return None
@@ -96,5 +92,5 @@ def get_default_server_icon_pixbuf(size: int = 48) -> GdkPixbuf.Pixbuf | None:
     # Create a simple colored pixbuf as default
     pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, size, size)
     # Fill with a nice purple/blue color
-    pixbuf.fill(0x7c6bf0ff)
+    pixbuf.fill(0x7C6BF0FF)
     return pixbuf

@@ -3,6 +3,7 @@ Windows single-instance IPC using a named kernel event.
 
 Allows a second instance to signal the first instance to show its window.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -28,6 +29,7 @@ def _ensure_event_name() -> str:
         return EVENT_NAME
     try:
         import os
+
         sid = os.environ.get("USERNAME", "default")
         return f"{EVENT_NAME}-{sid}"
     except Exception:

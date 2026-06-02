@@ -5,6 +5,7 @@ No external dependencies beyond Python's built-in ctypes.
 Creates a hidden message window on a daemon thread and uses
 Shell_NotifyIconW to manage the notification area icon.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -220,8 +221,10 @@ class WindowsTrayManager:
             class_name,
             "HostyTray",
             WS_OVERLAPPED,
-            CW_USEDEFAULT, CW_USEDEFAULT,
-            CW_USEDEFAULT, CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
             0,
             0,
             module,
@@ -331,8 +334,6 @@ class WindowsTrayManager:
     def _create_hicon(self) -> int:
         """Create a Windows HICON from the app icon or a fallback."""
         try:
-            from PIL import Image
-
             pil_image = self._build_icon_pil()
             if pil_image:
                 hicon = self._pil_to_hicon(pil_image)
@@ -356,11 +357,12 @@ class WindowsTrayManager:
                     success, buffer = res
                     if success:
                         from PIL import Image
+
                         return Image.open(io.BytesIO(buffer))
         except Exception as e:
             print(f"SVG icon load failed: {e}", file=sys.stderr)
 
-        from PIL import Image, ImageDraw
+        from PIL import Image
 
         return self._draw_fallback_pil()
 
@@ -376,6 +378,7 @@ class WindowsTrayManager:
 
         try:
             from PIL import ImageFont
+
             font = ImageFont.truetype("segoeui.ttf", 36)
         except Exception:
             font = ImageFont.load_default()
@@ -402,12 +405,7 @@ class WindowsTrayManager:
                 if candidate.exists():
                     return candidate
 
-        dev_path = (
-            Path(__file__).resolve().parents[3]
-            / "packaging"
-            / "linux"
-            / "io.github.sugarycandybar.Hosty.svg"
-        )
+        dev_path = Path(__file__).resolve().parents[3] / "packaging" / "linux" / "io.github.sugarycandybar.Hosty.svg"
         if dev_path.exists():
             return dev_path
         return None
@@ -425,8 +423,11 @@ class WindowsTrayManager:
             os.close(fd)
             img.save(path, format="ICO", sizes=[(img.width, img.height)])
             hicon = user32.LoadImageW(
-                0, path, IMAGE_ICON,
-                0, 0,
+                0,
+                path,
+                IMAGE_ICON,
+                0,
+                0,
                 LR_LOADFROMFILE | LR_DEFAULTSIZE,
             )
             return hicon or 0
@@ -442,8 +443,11 @@ class WindowsTrayManager:
     def _hicon_fallback(self) -> int:
         """Fallback HICON using a standard Windows application icon."""
         hicon = user32.LoadImageW(
-            None, "#32512", IMAGE_ICON,  # IDI_APPLICATION
-            32, 32,
+            None,
+            "#32512",
+            IMAGE_ICON,  # IDI_APPLICATION
+            32,
+            32,
             LR_DEFAULTSIZE,
         )
         return hicon or 0
@@ -469,7 +473,8 @@ class WindowsTrayManager:
         cmd = user32.TrackPopupMenu(
             hmenu,
             TPM_RETURNCMD | TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON,
-            pt.x, pt.y,
+            pt.x,
+            pt.y,
             0,
             self._hwnd,
             None,

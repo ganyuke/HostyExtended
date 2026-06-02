@@ -1,6 +1,7 @@
 """
 Playit tunnel manager.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -16,7 +17,6 @@ import time
 import urllib.request
 from datetime import datetime as dt
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -32,14 +32,12 @@ except ImportError:
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 ENDPOINT_URL_RE = re.compile(r"(?:tcp|udp)://([A-Za-z0-9.-]+:\d{2,5})")
-ENDPOINT_HOSTPORT_RE = re.compile(
-    r"(((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}):\d{2,5})"
-)
+ENDPOINT_HOSTPORT_RE = re.compile(r"(((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}):\d{2,5})")
 SECRET_VALUE_RE = re.compile(r'(?mi)^\s*(?:secret|secret_key|key)\s*=\s*"([^"]+)"\s*$')
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
-def _split_endpoint(endpoint: str) -> tuple[str, Optional[int]]:
+def _split_endpoint(endpoint: str) -> tuple[str, int | None]:
     text = str(endpoint or "").strip()
     if not text:
         return "", None
@@ -100,7 +98,7 @@ class PlayitManager(EventEmitter):
             return dict(self._data.get(str(tunnel_id), {}))
 
     class Tunnel:
-        def __init__(self, parent: "PlayitManager", tunnel_data: dict):
+        def __init__(self, parent: PlayitManager, tunnel_data: dict):
             self._parent = parent
             self._cost = int(tunnel_data.get("port_count", 1) or 1)
 
@@ -111,10 +109,10 @@ class PlayitManager(EventEmitter):
             self.status = str((tunnel_data.get("alloc") or {}).get("status", "pending"))
 
             self.region = ""
-            self.port: Optional[int] = None
+            self.port: int | None = None
             self.host = ""
             self.domain = ""
-            self.remote_port: Optional[int] = None
+            self.remote_port: int | None = None
             self.hostname = ""
             self.created = dt.now().astimezone()
             self.in_use = False
@@ -167,13 +165,13 @@ class PlayitManager(EventEmitter):
     def __init__(self):
         super().__init__()
 
-        self._process: Optional[subprocess.Popen] = None
-        self._server_id: Optional[str] = None
+        self._process: subprocess.Popen | None = None
+        self._server_id: str | None = None
         self._status = "stopped"
         self._public_endpoint = ""
         self._claim_url = ""
-        self._read_thread: Optional[threading.Thread] = None
-        self._watch_thread: Optional[threading.Thread] = None
+        self._read_thread: threading.Thread | None = None
+        self._watch_thread: threading.Thread | None = None
 
         self._git_base = "https://github.com/playit-cloud/playit-agent/releases"
         self._api_base = "https://api.playit.gg"
@@ -197,10 +195,10 @@ class PlayitManager(EventEmitter):
         }
 
         self.initialized = False
-        self._agent_id: Optional[str] = None
-        self._proto_key: Optional[str] = None
-        self._secret_key: Optional[str] = None
-        self._active_tunnel_id: Optional[str] = None
+        self._agent_id: str | None = None
+        self._proto_key: str | None = None
+        self._secret_key: str | None = None
+        self._active_tunnel_id: str | None = None
         self._last_error = ""
 
     def _is_invalid_agent_key_error(self, detail: str) -> bool:
@@ -221,7 +219,7 @@ class PlayitManager(EventEmitter):
         return self._claim_url
 
     @property
-    def server_id(self) -> Optional[str]:
+    def server_id(self) -> str | None:
         return self._server_id
 
     @property
@@ -233,7 +231,7 @@ class PlayitManager(EventEmitter):
         filename = "playit.exe" if sys.platform == "win32" else "playit"
         return self.directory / filename
 
-    def resolve_binary(self) -> Optional[str]:
+    def resolve_binary(self) -> str | None:
         bundled = self.binary_path
         if bundled.exists() and bundled.is_file():
             return str(bundled)
@@ -334,7 +332,7 @@ class PlayitManager(EventEmitter):
         except Exception:
             return False
 
-    def secret_path(self) -> Optional[Path]:
+    def secret_path(self) -> Path | None:
         binary = self.resolve_binary()
         if not binary:
             return None
@@ -403,9 +401,9 @@ class PlayitManager(EventEmitter):
             if match:
                 version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
                 return version
-        except Exception as e:
+        except Exception:
             pass
-        
+
         # Try old style: playit --version
         try:
             result = subprocess.run(
@@ -421,9 +419,9 @@ class PlayitManager(EventEmitter):
             if match:
                 version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
                 return version
-        except Exception as e:
+        except Exception:
             pass
-        
+
         return 0, 17, 1
 
     def _is_incompatible_version(self, binary: str) -> bool:
@@ -512,7 +510,7 @@ class PlayitManager(EventEmitter):
         except Exception as e:
             return False, str(e)
 
-    def _select_asset(self, assets: list[dict]) -> Optional[dict]:
+    def _select_asset(self, assets: list[dict]) -> dict | None:
         sys_name = platform.system().lower()
         machine = platform.machine().lower()
 
@@ -627,12 +625,7 @@ class PlayitManager(EventEmitter):
             return False, f"Link service returned invalid JSON (HTTP {response.status_code}): {raw_text}"
 
         if response.status_code >= 400:
-            error_detail = (
-                data.get("error")
-                or data.get("message")
-                or data.get("detail")
-                or raw_text
-            )
+            error_detail = data.get("error") or data.get("message") or data.get("detail") or raw_text
             return False, f"Link service returned HTTP {response.status_code}: {error_detail}"
 
         if data.get("status", "fail") == "success":
@@ -656,7 +649,10 @@ class PlayitManager(EventEmitter):
 
         if self._is_invalid_agent_key_error(self._last_error):
             self.unlink_account()
-            return False, "playit rejected the linked key (InvalidAgentKey). Please generate a new setup code and try again"
+            return (
+                False,
+                "playit rejected the linked key (InvalidAgentKey). Please generate a new setup code and try again",
+            )
 
         return True, "playit account linked (API sync pending)"
 
@@ -874,8 +870,8 @@ class PlayitManager(EventEmitter):
                         "agent_id": self._agent_id,
                         "local_ip": "127.0.0.1",
                         "local_port": int(local_port),
-                    }
-                }
+                    },
+                },
             }
             data = self._request("tunnels/update", json=payload)
             return data.get("status") == "success"
@@ -1071,11 +1067,7 @@ class PlayitManager(EventEmitter):
             self.stop()
 
         self._retrieve_tunnels()
-        candidates = [
-            tunnel
-            for tunnel in list(self.tunnels.get(protocol, []))
-            if tunnel.port == int(port)
-        ]
+        candidates = [tunnel for tunnel in list(self.tunnels.get(protocol, [])) if tunnel.port == int(port)]
 
         deleted_any = False
         for tunnel in candidates:
@@ -1133,7 +1125,9 @@ class PlayitManager(EventEmitter):
 
         return True, ""
 
-    def _resolve_tunnel_port(self, server_dir: str, protocol: str, bedrock_port: int = 19132, voicechat_port: int = 24454) -> int:
+    def _resolve_tunnel_port(
+        self, server_dir: str, protocol: str, bedrock_port: int = 19132, voicechat_port: int = 24454
+    ) -> int:
         if protocol == "tcp":
             return self._read_server_port(server_dir)
 
@@ -1147,11 +1141,7 @@ class PlayitManager(EventEmitter):
 
     def _list_tunnels_for_port(self, port: int, protocol: str) -> list[Tunnel]:
         self._retrieve_tunnels()
-        return [
-            tunnel
-            for tunnel in list(self.tunnels.get(protocol, []))
-            if tunnel.port == int(port)
-        ]
+        return [tunnel for tunnel in list(self.tunnels.get(protocol, [])) if tunnel.port == int(port)]
 
     def _add_tunnel_for_protocol(
         self,
@@ -1494,12 +1484,14 @@ class PlayitManager(EventEmitter):
         if not replaced:
             if out and out[-1].strip():
                 out.append("")
-            out.extend([
-                "bedrock:",
-                "  address: 0.0.0.0",
-                f"  port: {port}",
-                "  clone-remote-port: false",
-            ])
+            out.extend(
+                [
+                    "bedrock:",
+                    "  address: 0.0.0.0",
+                    f"  port: {port}",
+                    "  clone-remote-port: false",
+                ]
+            )
 
         return "\n".join(out) + "\n"
 
@@ -1541,10 +1533,12 @@ class PlayitManager(EventEmitter):
         if not replaced:
             if out and out[-1].strip():
                 out.append("")
-            out.extend([
-                "remote:",
-                f"  auth-type: {auth_type}",
-            ])
+            out.extend(
+                [
+                    "remote:",
+                    f"  auth-type: {auth_type}",
+                ]
+            )
 
         return "\n".join(out) + "\n"
 
@@ -1632,12 +1626,12 @@ class PlayitManager(EventEmitter):
             self._retrieve_tunnels()
             # The label used in _add_tunnel_for_protocol
             label_prefix = f"hosty-{re.sub(r'[^a-zA-Z0-9-]', '-', server_id.lower())}-voicechat"
-            
+
             for tunnel in self.tunnels.get("udp", []):
                 if tunnel.name.startswith(label_prefix):
                     voice_tunnel = tunnel
                     break
-            
+
             if voice_tunnel and voice_tunnel.domain and voice_tunnel.remote_port:
                 domain = str(voice_tunnel.domain)
                 remote_port = int(voice_tunnel.remote_port)
@@ -1657,7 +1651,7 @@ class PlayitManager(EventEmitter):
 
         if tomlkit is None:
             return self._write_voicechat_toml_fallback(config_file, remote_port, domain)
-        
+
         try:
             if config_file.exists():
                 content = config_file.read_text(encoding="utf-8")

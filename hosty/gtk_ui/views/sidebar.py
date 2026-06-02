@@ -1,21 +1,22 @@
 """
 Sidebar - Server list sidebar with status indicators and management.
 """
-import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-gi.require_version('GdkPixbuf', '2.0')
-from gi.repository import Gtk, Adw, GLib, Gdk, GdkPixbuf, GObject, Gio
 
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
-from hosty.shared.backend.server_process import ServerProcess
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Adw, Gdk, Gio, GObject, Gtk
+
+from hosty.shared.backend.server_manager import ServerInfo, ServerManager
 from hosty.shared.utils.constants import ServerStatus
-from hosty.shared.utils.image_utils import load_pixbuf, get_default_server_icon_pixbuf
+from hosty.shared.utils.image_utils import load_pixbuf
 
 
 class ServerRow(Adw.ActionRow):
     """A server entry in the sidebar list."""
-    
+
     def __init__(self, server_info: ServerInfo, server_manager: ServerManager):
         super().__init__()
         self.server_info = server_info
@@ -23,18 +24,18 @@ class ServerRow(Adw.ActionRow):
         self._process = None
         self._status_handler_id = None
         self._players_handler_id = None
-        
+
         self.set_title(server_info.name)
         self.set_subtitle(self._subtitle_text())
         self.set_tooltip_text(server_info.mc_version)
         self.set_activatable(True)
-        
+
         # Server icon
         self._avatar = Adw.Avatar(size=42, text=server_info.name, show_initials=True)
         self._avatar.add_css_class("server-avatar")
         self._update_icon()
         self.add_prefix(self._avatar)
-        
+
         # Status dot
         self._status_dot = Gtk.Label()
         self._status_dot.set_size_request(10, 10)
@@ -42,7 +43,7 @@ class ServerRow(Adw.ActionRow):
         self._status_dot.add_css_class("stopped")
         self._status_dot.set_valign(Gtk.Align.CENTER)
         self.add_suffix(self._status_dot)
-        
+
         # Keep startup fast by attaching to a process only when needed.
         self.attach_existing_process()
 
@@ -50,19 +51,17 @@ class ServerRow(Adw.ActionRow):
         if self._process and self._process.is_running:
             return f"{self.server_info.mc_version} · {self._process.player_count}/{self._process.max_players}"
         return self.server_info.mc_version
-    
+
     def _update_icon(self):
         """Update the avatar icon from the server's icon path."""
         if self.server_info.icon_path:
             try:
-                texture = Gdk.Texture.new_for_pixbuf(
-                    load_pixbuf(self.server_info.icon_path, 42)
-                )
+                texture = Gdk.Texture.new_for_pixbuf(load_pixbuf(self.server_info.icon_path, 42))
                 paintable = texture
                 self._avatar.set_custom_image(paintable)
             except Exception:
                 pass
-    
+
     def _on_status_changed(self, process, status):
         """Handle process status change."""
         self._update_status(status)
@@ -71,7 +70,7 @@ class ServerRow(Adw.ActionRow):
     def _on_players_changed(self, process, player_count, max_players):
         """Handle player count updates from server output."""
         self.set_subtitle(self._subtitle_text())
-    
+
     def _update_status(self, status: str):
         """Update the status dot."""
         for cls in ["running", "starting", "stopping", "stopped"]:
@@ -108,8 +107,8 @@ class ServerRow(Adw.ActionRow):
         self._disconnect_process_handlers()
         self._process = process
         if process:
-            self._status_handler_id = process.connect('status-changed', self._on_status_changed)
-            self._players_handler_id = process.connect('players-changed', self._on_players_changed)
+            self._status_handler_id = process.connect("status-changed", self._on_status_changed)
+            self._players_handler_id = process.connect("players-changed", self._on_players_changed)
             self._update_status(process.status)
         else:
             self._update_status(ServerStatus.STOPPED)
@@ -127,7 +126,7 @@ class ServerRow(Adw.ActionRow):
         """Disconnect signal handlers before row destruction."""
         self._disconnect_process_handlers()
         self._process = None
-    
+
     def update_info(self, server_info: ServerInfo):
         """Update displayed info."""
         self.server_info = server_info
@@ -139,26 +138,26 @@ class ServerRow(Adw.ActionRow):
 
 class Sidebar(Gtk.Box):
     """Server list sidebar."""
-    
+
     __gsignals__ = {
-        'server-selected': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "server-selected": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
-    
+
     def __init__(self, server_manager: ServerManager):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._server_manager = server_manager
-        
+
         self._toolbar_view = Adw.ToolbarView()
         self._toolbar_view.set_hexpand(True)
         self._toolbar_view.set_vexpand(True)
         self.append(self._toolbar_view)
         self._rows: dict[str, ServerRow] = {}
         self.add_css_class("server-sidebar")
-        
+
         # Header bar — GNOME Files–like: new server top-left, centered title, menu top-right
         header = Adw.HeaderBar()
         header.set_show_end_title_buttons(False)
-        
+
         add_btn = Gtk.Button(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER)
         add_btn.set_tooltip_text("Create new server")
         add_btn.add_css_class("flat")
@@ -166,11 +165,11 @@ class Sidebar(Gtk.Box):
         add_btn.set_focusable(True)
         self._add_btn = add_btn
         header.pack_start(add_btn)
-        
+
         title = Gtk.Label(label="Servers")
         title.add_css_class("sidebar-header-title")
         header.set_title_widget(title)
-        
+
         menu_btn = Gtk.MenuButton(valign=Gtk.Align.CENTER)
         menu_btn.set_icon_name("open-menu-symbolic")
         menu_btn.set_tooltip_text("Main menu")
@@ -183,20 +182,20 @@ class Sidebar(Gtk.Box):
         menu_btn.set_menu_model(menu)
         self._menu_btn = menu_btn
         header.pack_end(menu_btn)
-        
+
         self._toolbar_view.add_top_bar(header)
-        
+
         # Server list
         self._scrolled = Gtk.ScrolledWindow()
         self._scrolled.set_vexpand(True)
         self._scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        
+
         self._listbox = Gtk.ListBox()
         self._listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._listbox.add_css_class("navigation-sidebar")
         self._listbox.set_focusable(True)
         self._listbox.connect("row-selected", self._on_row_selected)
-        
+
         self._scrolled.set_child(self._listbox)
         self._toolbar_view.set_content(self._scrolled)
 
@@ -214,35 +213,35 @@ class Sidebar(Gtk.Box):
         self._menu_header_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         self._menu_header_controller.connect("key-pressed", self._on_header_key_pressed)
         menu_btn.add_controller(self._menu_header_controller)
-        
+
         # Connect to server manager signals
-        server_manager.connect('server-added', self._on_server_added)
-        server_manager.connect('server-removed', self._on_server_removed)
-        server_manager.connect('server-changed', self._on_server_changed)
-        
+        server_manager.connect("server-added", self._on_server_added)
+        server_manager.connect("server-removed", self._on_server_removed)
+        server_manager.connect("server-changed", self._on_server_changed)
+
         # Populate initial servers
         self._populate()
-        
+
         # Right-click menu setup
         self._setup_context_menu()
-    
+
     def _populate(self):
         """Populate the list with existing servers."""
         for server in self._server_manager.servers:
             self._add_row(server)
-    
+
     def _add_row(self, server_info: ServerInfo):
         """Add a server row to the list."""
         row = ServerRow(server_info, self._server_manager)
         self._rows[server_info.id] = row
         self._listbox.append(row)
-    
+
     def _on_row_selected(self, listbox, row):
         """Handle server selection."""
         if row and isinstance(row, ServerRow):
             row.ensure_process_attached()
-            self.emit('server-selected', row.server_info.id)
-    
+            self.emit("server-selected", row.server_info.id)
+
     def _on_server_added(self, manager, server_id):
         """Handle new server added."""
         info = manager.get_server(server_id)
@@ -252,7 +251,7 @@ class Sidebar(Gtk.Box):
             row = self._rows.get(server_id)
             if row:
                 self._listbox.select_row(row)
-    
+
     def _on_server_removed(self, manager, server_id):
         """Handle server removed."""
         row = self._rows.pop(server_id, None)
@@ -263,19 +262,19 @@ class Sidebar(Gtk.Box):
 
         if was_selected:
             self._listbox.select_row(None)
-            self.emit('server-selected', "")
+            self.emit("server-selected", "")
             return
 
         if not self._rows:
-            self.emit('server-selected', "")
-    
+            self.emit("server-selected", "")
+
     def _on_server_changed(self, manager, server_id):
         """Handle server info changed."""
         row = self._rows.get(server_id)
         info = manager.get_server(server_id)
         if row and info:
             row.update_info(info)
-    
+
     def select_server(self, server_id: str):
         """Programmatically select a server."""
         row = self._rows.get(server_id)
@@ -344,7 +343,7 @@ class Sidebar(Gtk.Box):
             self.focus_selected_server()
             return True
         return False
-    
+
     def _setup_context_menu(self):
         """Setup right-click context menu for server rows."""
         gesture = Gtk.GestureClick()
@@ -357,10 +356,10 @@ class Sidebar(Gtk.Box):
         gesture.connect("cancel", self._on_right_click_cancel)
         gesture.connect("unpaired-release", self._on_right_click_cancel)
         self._listbox.add_controller(gesture)
-        
+
         # Keep track of which row is being pressed
         self._active_context_row = None
-    
+
     def _on_right_click_pressed(self, gesture, n_press, x, y):
         """Handle right-click press on a server row."""
         if n_press != 1:
@@ -389,15 +388,15 @@ class Sidebar(Gtk.Box):
 
         if not row or not isinstance(row, ServerRow):
             return
-        
+
         server_info = row.server_info
-        
+
         # Build popup menu — Rename not first (reduces mis-taps on first item)
         menu = Gio.Menu()
         menu.append("Change Icon", f"app.change-icon::{server_info.id}")
         menu.append("Rename…", f"app.rename-server::{server_info.id}")
         menu.append("Delete", f"app.delete-server::{server_info.id}")
-        
+
         popover = Gtk.PopoverMenu(menu_model=menu)
         # Parent must match coordinate space of the gesture (listbox), not the row
         popover.set_parent(self._listbox)
@@ -410,9 +409,10 @@ class Sidebar(Gtk.Box):
 
         # Highlight the row while the menu is open
         row.add_css_class("context-open")
+
         def on_closed(p):
             row.remove_css_class("context-open")
-        
+
         popover.connect("closed", on_closed)
 
         popover.popup()

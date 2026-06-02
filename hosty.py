@@ -4,6 +4,7 @@ Hosty - Fabric Minecraft Server Manager
 A modern libadwaita application for creating, running,
 and managing Fabric Minecraft servers.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -73,9 +74,7 @@ def _configure_windows_app_identity() -> None:
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "io.github.sugarycandybar.Hosty"
-        )
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("io.github.sugarycandybar.Hosty")
     except Exception:
         pass
 

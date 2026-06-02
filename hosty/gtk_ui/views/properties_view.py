@@ -2,47 +2,45 @@
 PropertiesView - GUI editor for server.properties.
 Uses Adw.PreferencesPage with typed rows.
 """
-from typing import Optional
+
 import threading
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk
 
 from hosty.shared.backend.config_manager import ConfigManager
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
+from hosty.shared.backend.server_manager import ServerInfo, ServerManager
 from hosty.shared.utils.constants import (
+    DEFAULT_RAM_MB,
     DEFAULT_SERVER_PROPERTIES,
     DIFFICULTIES,
     GAMEMODES,
-    LEVEL_TYPES,
-    LEVEL_TYPE_NAMES,
-    MIN_RAM_MB,
     MAX_RAM_MB,
-    DEFAULT_RAM_MB,
+    MIN_RAM_MB,
     get_required_java_version,
 )
-
 
 DIFFICULTY_MODES = [*DIFFICULTIES, "hardcore"]
 
 
 class PropertiesView(Gtk.Box):
     """GUI editor for server.properties using Adwaita preference widgets."""
-    
+
     def __init__(self, toast_overlay=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_hexpand(True)
         self.set_vexpand(True)
-        self._config: Optional[ConfigManager] = None
-        self._server_manager: Optional[ServerManager] = None
-        self._server_info: Optional[ServerInfo] = None
+        self._config: ConfigManager | None = None
+        self._server_manager: ServerManager | None = None
+        self._server_info: ServerInfo | None = None
         self._widgets: dict = {}
-        self._ram_row: Optional[Adw.SpinRow] = None
+        self._ram_row: Adw.SpinRow | None = None
         self._suppress_changes = False
         self._app_toast_overlay = toast_overlay
-        
+
         # Restart banner
         self._banner = Adw.Banner()
         self._banner.set_title("Restart the server to apply changes")
@@ -50,32 +48,26 @@ class PropertiesView(Gtk.Box):
         self._banner.set_revealed(False)
         self._banner.connect("button-clicked", lambda b: b.set_revealed(False))
         self.append(self._banner)
-        
+
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
         scrolled.set_hexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        
+
         page = Adw.PreferencesPage()
-        
+
         # ===== General Group =====
         general = Adw.PreferencesGroup(title="General")
-        
+
         self._autostart_row = Adw.SwitchRow(
             title="Start on Launch",
             subtitle="Start this server automatically when Hosty opens",
         )
         general.add(self._autostart_row)
 
-        self._version_row = Adw.ActionRow(
-            title="Minecraft Version",
-            subtitle="Unknown"
-        )
-        
-        self._change_version_btn = Gtk.Button(
-            icon_name="software-update-available-symbolic",
-            valign=Gtk.Align.CENTER
-        )
+        self._version_row = Adw.ActionRow(title="Minecraft Version", subtitle="Unknown")
+
+        self._change_version_btn = Gtk.Button(icon_name="software-update-available-symbolic", valign=Gtk.Align.CENTER)
         self._change_version_btn.add_css_class("flat")
         self._change_version_btn.set_tooltip_text("Upgrade server version")
         self._change_version_btn.set_sensitive(False)
@@ -83,13 +75,9 @@ class PropertiesView(Gtk.Box):
         self._version_row.add_suffix(self._change_version_btn)
         general.add(self._version_row)
 
-        self._widgets["motd"] = self._add_entry_row(
-            general, "Message of the Day", "motd", "a hosty server"
-        )
-        
-        self._widgets["max-players"] = self._add_spin_row(
-            general, "Max Players", "max-players", 1, 1000, 20
-        )
+        self._widgets["motd"] = self._add_entry_row(general, "Message of the Day", "motd", "a hosty server")
+
+        self._widgets["max-players"] = self._add_spin_row(general, "Max Players", "max-players", 1, 1000, 20)
         default_difficulty_mode = (
             "hardcore"
             if str(DEFAULT_SERVER_PROPERTIES.get("hardcore", "false")).lower() == "true"
@@ -98,12 +86,10 @@ class PropertiesView(Gtk.Box):
         self._widgets["difficulty"] = self._add_combo_row(
             general, "Difficulty", "difficulty", DIFFICULTY_MODES, default_difficulty_mode
         )
-        self._widgets["gamemode"] = self._add_combo_row(
-            general, "Default Gamemode", "gamemode", GAMEMODES, "survival"
-        )
-        
+        self._widgets["gamemode"] = self._add_combo_row(general, "Default Gamemode", "gamemode", GAMEMODES, "survival")
+
         page.add(general)
-        
+
         # ===== Resources (Hosty — not in server.properties) =====
         resources = Adw.PreferencesGroup(title="Resources")
         ram_adj = Gtk.Adjustment(
@@ -117,19 +103,15 @@ class PropertiesView(Gtk.Box):
             title="Allocated RAM (MB)",
             adjustment=ram_adj,
         )
-        self._ram_row.set_tooltip_text(
-            f"Megabytes for the Java heap. Range {MIN_RAM_MB}–{MAX_RAM_MB}. "
-        )
+        self._ram_row.set_tooltip_text(f"Megabytes for the Java heap. Range {MIN_RAM_MB}–{MAX_RAM_MB}. ")
         resources.add(self._ram_row)
         page.add(resources)
 
         # ===== World Group =====
         world = Adw.PreferencesGroup(title="World")
-        
+
         # level-type is now read-only in the World Manager
-        self._widgets["view-distance"] = self._add_spin_row(
-            world, "View Distance", "view-distance", 2, 32, 10
-        )
+        self._widgets["view-distance"] = self._add_spin_row(world, "View Distance", "view-distance", 2, 32, 10)
         self._widgets["simulation-distance"] = self._add_spin_row(
             world, "Simulation Distance", "simulation-distance", 2, 32, 10
         )
@@ -139,48 +121,38 @@ class PropertiesView(Gtk.Box):
         self._widgets["max-world-size"] = self._add_spin_row(
             world, "Max World Size", "max-world-size", 1000, 29999984, 29999984
         )
-        
+
         page.add(world)
-        
+
         # ===== Network Group =====
         network = Adw.PreferencesGroup(title="Network")
-        
-        self._widgets["enable-query"] = self._add_switch_row(
-            network, "Enable Query", "enable-query", False, ""
-        )
-        
+
+        self._widgets["enable-query"] = self._add_switch_row(network, "Enable Query", "enable-query", False, "")
+
         page.add(network)
-        
+
         # ===== Players Group =====
         players = Adw.PreferencesGroup(title="Players")
-        
-        self._widgets["pvp"] = self._add_switch_row(
-            players, "PvP", "pvp", True, ""
-        )
-        self._widgets["allow-flight"] = self._add_switch_row(
-            players, "Allow Flight", "allow-flight", False, ""
-        )
-        self._widgets["keep-inventory"] = self._add_switch_row(
-            players, "Keep Inventory", "keep-inventory", False, ""
-        )
-        
+
+        self._widgets["pvp"] = self._add_switch_row(players, "PvP", "pvp", True, "")
+        self._widgets["allow-flight"] = self._add_switch_row(players, "Allow Flight", "allow-flight", False, "")
+        self._widgets["keep-inventory"] = self._add_switch_row(players, "Keep Inventory", "keep-inventory", False, "")
+
         page.add(players)
-        
+
         # ===== Advanced Group =====
         advanced = Adw.PreferencesGroup(title="Advanced")
-        
+
         self._widgets["enable-command-block"] = self._add_switch_row(
             advanced, "Command Blocks", "enable-command-block", False, ""
         )
-        self._widgets["allow-nether"] = self._add_switch_row(
-            advanced, "Allow Nether", "allow-nether", True, ""
-        )
-        
+        self._widgets["allow-nether"] = self._add_switch_row(advanced, "Allow Nether", "allow-nether", True, "")
+
         page.add(advanced)
-        
+
         scrolled.set_child(page)
         self.append(scrolled)
-        
+
         self._connect_auto_save_signals()
 
     def _connect_auto_save_signals(self):
@@ -203,24 +175,24 @@ class PropertiesView(Gtk.Box):
     def _on_autostart_toggled(self, row, _pspec):
         if self._suppress_changes or not self._server_manager or not self._server_info:
             return
-            
+
         active = row.get_active()
         success, err = self._server_manager.set_server_autostart(self._server_info.id, active)
-        
+
         if not success:
             # Revert the toggle and show error
             self._suppress_changes = True
             row.set_active(not active)
             self._suppress_changes = False
-            
+
             # Show toast/banner
             self._banner.set_title(err)
             self._banner.set_revealed(True)
-    
+
     def _on_entry_apply(self, row, title):
         """Handle entry row apply/confirmation."""
         self._show_toast("Property updated")
-    
+
     def _show_toast(self, message: str, timeout: int = 2):
         """Show a toast notification."""
         if not self._app_toast_overlay:
@@ -228,7 +200,7 @@ class PropertiesView(Gtk.Box):
         toast = Adw.Toast(title=message)
         toast.set_timeout(timeout)
         self._app_toast_overlay.add_toast(toast)
-            
+
     def _add_entry_row(self, group, title, key, default):
         """Add an Adw.EntryRow to a group."""
         row = Adw.EntryRow(title=title)
@@ -238,18 +210,15 @@ class PropertiesView(Gtk.Box):
         row.connect("apply", self._on_entry_apply, title)
         group.add(row)
         return row
-    
+
     def _add_spin_row(self, group, title, key, min_val, max_val, default):
         """Add an Adw.SpinRow to a group."""
-        adj = Gtk.Adjustment(
-            value=default, lower=min_val, upper=max_val,
-            step_increment=1, page_increment=10
-        )
+        adj = Gtk.Adjustment(value=default, lower=min_val, upper=max_val, step_increment=1, page_increment=10)
         row = Adw.SpinRow(title=title, adjustment=adj)
         row._prop_key = key
         group.add(row)
         return row
-    
+
     def _add_switch_row(self, group, title, key, default, subtitle=""):
         """Add an Adw.SwitchRow to a group."""
         row = Adw.SwitchRow(title=title)
@@ -259,36 +228,36 @@ class PropertiesView(Gtk.Box):
         row._prop_key = key
         group.add(row)
         return row
-    
+
     def _add_combo_row(self, group, title, key, options, default):
         """Add an Adw.ComboRow to a group."""
         string_list = Gtk.StringList.new(options)
         row = Adw.ComboRow(title=title, model=string_list)
         row._prop_key = key
         row._options = options
-        
+
         # Set default selection
         try:
             idx = options.index(default)
             row.set_selected(idx)
         except ValueError:
             row.set_selected(0)
-        
+
         group.add(row)
         return row
-    
+
     def set_config(
         self,
         config: ConfigManager,
-        server_manager: Optional[ServerManager] = None,
-        server_info: Optional[ServerInfo] = None,
+        server_manager: ServerManager | None = None,
+        server_info: ServerInfo | None = None,
     ):
         """Load a server's config into the view."""
         self._config = config
         self._server_manager = server_manager
         self._server_info = server_info
-        
-        if self._server_info and hasattr(self, '_version_row'):
+
+        if self._server_info and hasattr(self, "_version_row"):
             version_text = self._server_info.mc_version or "Unknown"
             if self._server_info.loader_version:
                 version_text += f" ({self._server_info.loader_version})"
@@ -355,7 +324,7 @@ class PropertiesView(Gtk.Box):
         loader_values: list[str] = []
         mc_row = Adw.ComboRow(title="Minecraft version", model=Gtk.StringList.new(["Loading..."]))
         runtime_group.add(mc_row)
-        
+
         fabric_version_row = Adw.ActionRow(
             title="Fabric loader",
             subtitle="Loading...",
@@ -369,7 +338,7 @@ class PropertiesView(Gtk.Box):
         )
         java_info_row.set_activatable(False)
         runtime_group.add(java_info_row)
-        
+
         runtime_page.add(runtime_group)
         stack.add_named(runtime_page, "runtime")
 
@@ -415,13 +384,9 @@ class PropertiesView(Gtk.Box):
             else:
                 system_ver = java_mgr.system_java_version
                 if system_ver and system_ver >= java_ver:
-                    java_info_row.set_subtitle(
-                        f"Java {java_ver} needed — system Java {system_ver} can be used"
-                    )
+                    java_info_row.set_subtitle(f"Java {java_ver} needed — system Java {system_ver} can be used")
                 else:
-                    java_info_row.set_subtitle(
-                        f"Java {java_ver} needed — will be downloaded automatically"
-                    )
+                    java_info_row.set_subtitle(f"Java {java_ver} needed — will be downloaded automatically")
 
         def selected_mc_version() -> str:
             idx = int(mc_row.get_selected())
@@ -478,13 +443,9 @@ class PropertiesView(Gtk.Box):
             def loaded():
                 current_mc = self._server_info.mc_version
                 current_loader = self._server_info.loader_version
-                next_games = [
-                    v for v in games
-                    if ServerManager.is_version_after(v, current_mc)
-                ]
+                next_games = [v for v in games if ServerManager.is_version_after(v, current_mc)]
                 next_loaders = [
-                    v for v in loaders
-                    if not current_loader or ServerManager.is_version_at_least(v, current_loader)
+                    v for v in loaders if not current_loader or ServerManager.is_version_at_least(v, current_loader)
                 ]
                 mc_values.clear()
                 mc_values.extend(next_games)
@@ -536,15 +497,27 @@ class PropertiesView(Gtk.Box):
                     unknown = plan.get("unknown", {})
                     add_plan_group(
                         "Compatible and Will Be Updated",
-                        [*compatible.get("modpacks", []), *compatible.get("mods", []), *compatible.get("datapacks", [])],
+                        [
+                            *compatible.get("modpacks", []),
+                            *compatible.get("mods", []),
+                            *compatible.get("datapacks", []),
+                        ],
                         "No tracked compatible items found",
                     )
                     add_plan_group(
                         "Incompatible and Will Be Disabled",
-                        [*incompatible.get("modpacks", []), *incompatible.get("mods", []), *incompatible.get("datapacks", [])],
+                        [
+                            *incompatible.get("modpacks", []),
+                            *incompatible.get("mods", []),
+                            *incompatible.get("datapacks", []),
+                        ],
                         "No incompatible items found",
                     )
-                    unknown_items = [*unknown.get("modpacks", []), *unknown.get("mods", []), *unknown.get("datapacks", [])]
+                    unknown_items = [
+                        *unknown.get("modpacks", []),
+                        *unknown.get("mods", []),
+                        *unknown.get("datapacks", []),
+                    ]
                     if unknown_items:
                         add_plan_group("Could Not Check", unknown_items, "")
                     primary_btn.set_label("Update")
@@ -629,22 +602,22 @@ class PropertiesView(Gtk.Box):
             return
         self._config.load()
         self._populate()
-    
+
     def _populate(self):
         """Populate widgets from config."""
         if not self._config:
             return
-        
+
         self._suppress_changes = True
-        
+
         if self._ram_row and self._server_info:
             self._ram_row.set_value(float(self._server_info.ram_mb))
         elif self._ram_row:
             self._ram_row.set_value(float(DEFAULT_RAM_MB))
-            
+
         if hasattr(self, "_autostart_row") and self._server_info:
-            self._autostart_row.set_active(getattr(self._server_info, 'autostart', False))
-        
+            self._autostart_row.set_active(getattr(self._server_info, "autostart", False))
+
         for key, widget in self._widgets.items():
             if isinstance(widget, Adw.EntryRow):
                 val = self._config.get(key, "")
@@ -673,9 +646,9 @@ class PropertiesView(Gtk.Box):
                         widget.set_selected(idx)
                     except ValueError:
                         widget.set_selected(0)
-        
+
         self._suppress_changes = False
-    
+
     def _on_widget_changed(self, *_args):
         if self._suppress_changes:
             return
@@ -685,7 +658,7 @@ class PropertiesView(Gtk.Box):
         """Save properties to file."""
         if not self._config:
             return
-        
+
         for key, widget in self._widgets.items():
             if isinstance(widget, Adw.EntryRow):
                 self._config.set_value(key, widget.get_text())
@@ -708,7 +681,7 @@ class PropertiesView(Gtk.Box):
                 else:
                     val = options[idx] if idx < len(options) else options[0]
                     self._config.set_value(key, val)
-        
+
         self._config.save()
         running = False
         if self._server_manager and self._server_info and self._ram_row:

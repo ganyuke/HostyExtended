@@ -1,36 +1,23 @@
 """
 ConnectView - Server connection tools (playit.gg tunnel).
 """
+
 from __future__ import annotations
 
-import json
 import socket
-import subprocess
-import sys
-import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Adw, Gdk, GLib
-
-from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
-from hosty.shared.backend.server_manager import ServerInfo, ServerManager
-from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
-
+from gi.repository import Adw, Gdk, Gtk
 
 PLAYIT_DASHBOARD_URL = "https://playit.gg/account/tunnels"
 
 
-
 from ..utils import *
+
 
 class LocalIpMixin:
     def _make_local_network_group(self) -> Adw.PreferencesGroup:
@@ -97,4 +84,3 @@ class LocalIpMixin:
         except Exception:
             pass
         self._toast("Could not access clipboard")
-

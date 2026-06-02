@@ -1,7 +1,7 @@
-import struct
 import gzip
+import struct
 from pathlib import Path
-from typing import Optional, Tuple
+
 
 class _NbtReader:
     def __init__(self, data: bytes):
@@ -9,7 +9,7 @@ class _NbtReader:
         self.pos = 0
 
     def _read(self, size: int) -> bytes:
-        chunk = self.data[self.pos:self.pos + size]
+        chunk = self.data[self.pos : self.pos + size]
         if len(chunk) != size:
             raise ValueError("Unexpected end of NBT data")
         self.pos += size
@@ -71,7 +71,8 @@ class _NbtReader:
             return None
         raise ValueError(f"Unsupported NBT tag {tag_type}")
 
-def _read_nbt_file(nbt_file: Path) -> Optional[dict]:
+
+def _read_nbt_file(nbt_file: Path) -> dict | None:
     if not nbt_file.is_file():
         return None
     try:
@@ -89,8 +90,10 @@ def _read_nbt_file(nbt_file: Path) -> Optional[dict]:
     except Exception:
         return None
 
+
 def get_world_seed(world_dir: Path) -> str:
     """Return the seed stored in level.dat when it can be read."""
+
     def _extract_seed(node) -> str:
         if isinstance(node, dict):
             lower_map = {str(key).casefold(): value for key, value in node.items()}
@@ -122,30 +125,37 @@ def get_world_seed(world_dir: Path) -> str:
         world_dir / "level.dat",
         world_dir / "level.dat_old",
         world_dir / "data" / "minecraft" / "world_gen_settings.dat",
-        world_dir / "data" / "world_gen_settings.dat"
+        world_dir / "data" / "world_gen_settings.dat",
     ]:
         nbt = _read_nbt_file(target)
         if nbt:
             s = _extract_seed(nbt)
-            if s: return s
+            if s:
+                return s
     return ""
+
 
 def get_world_type(world_dir: Path) -> str:
     """Return the world type from level.dat (e.g. minecraft\\:normal)."""
+
     def _extract_type(node) -> str:
         if not isinstance(node, dict):
             return ""
-        
+
         lower_map = {str(k).casefold(): v for k, v in node.items()}
-        
+
         # Legacy
         if "generatorname" in lower_map:
             gn = str(lower_map["generatorname"]).lower()
-            if gn == "flat": return "minecraft\\:flat"
-            if gn == "largebiomes": return "minecraft\\:large_biomes"
-            if gn == "amplified": return "minecraft\\:amplified"
-            if gn == "default": return "minecraft\\:normal"
-            
+            if gn == "flat":
+                return "minecraft\\:flat"
+            if gn == "largebiomes":
+                return "minecraft\\:large_biomes"
+            if gn == "amplified":
+                return "minecraft\\:amplified"
+            if gn == "default":
+                return "minecraft\\:normal"
+
         # Modern
         dims = lower_map.get("dimensions")
         if isinstance(dims, dict):
@@ -161,38 +171,46 @@ def get_world_type(world_dir: Path) -> str:
                         return "minecraft\\:flat"
                     if t == "minecraft:noise" or t == "noise":
                         s = str(gen_lower.get("settings", "")).lower()
-                        if "amplified" in s: return "minecraft\\:amplified"
-                        if "large_biomes" in s: return "minecraft\\:large_biomes"
-                        
+                        if "amplified" in s:
+                            return "minecraft\\:amplified"
+                        if "large_biomes" in s:
+                            return "minecraft\\:large_biomes"
+
                         bs = gen_lower.get("biome_source", {})
                         if isinstance(bs, dict):
                             bs_lower = {str(k).casefold(): v for k, v in bs.items()}
                             p = str(bs_lower.get("preset", "")).lower()
-                            if "large_biomes" in p: return "minecraft\\:large_biomes"
-                            if "amplified" in p: return "minecraft\\:amplified"
+                            if "large_biomes" in p:
+                                return "minecraft\\:large_biomes"
+                            if "amplified" in p:
+                                return "minecraft\\:amplified"
                             bst = str(bs_lower.get("type", "")).lower()
-                            if "fixed" in bst or "single" in bst: return "minecraft\\:single_biome_surface"
-                            
+                            if "fixed" in bst or "single" in bst:
+                                return "minecraft\\:single_biome_surface"
+
                         return "minecraft\\:normal"
-                            
+
         for value in node.values():
             if isinstance(value, dict):
                 res = _extract_type(value)
-                if res: return res
+                if res:
+                    return res
         return ""
 
     for target in [
         world_dir / "level.dat",
         world_dir / "level.dat_old",
         world_dir / "data" / "minecraft" / "world_gen_settings.dat",
-        world_dir / "data" / "world_gen_settings.dat"
+        world_dir / "data" / "world_gen_settings.dat",
     ]:
         nbt = _read_nbt_file(target)
         if nbt:
             t = _extract_type(nbt)
-            if t: return t
+            if t:
+                return t
     return ""
 
-def get_world_info(world_dir: Path) -> Tuple[str, str]:
+
+def get_world_info(world_dir: Path) -> tuple[str, str]:
     """Returns (seed, type)."""
     return get_world_seed(world_dir), get_world_type(world_dir)

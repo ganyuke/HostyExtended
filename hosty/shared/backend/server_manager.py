@@ -2,31 +2,33 @@
 ServerManager - CRUD operations for server instances.
 Handles persistence, creation workflow, and server lifecycle.
 """
+
 import json
-import uuid
-import shutil
-import zipfile
 import re
+import shutil
+import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from hosty.shared.utils.constants import (
-    SERVERS_DIR, CONFIG_FILE, DEFAULT_RAM_MB, DEFAULT_SERVER_PROPERTIES,
-    get_required_java_version,
-)
-from hosty.shared.backend.server_process import ServerProcess
 from hosty.shared.backend.config_manager import ConfigManager
-from hosty.shared.backend.java_manager import JavaManager
 from hosty.shared.backend.download_manager import DownloadManager
+from hosty.shared.backend.java_manager import JavaManager
 from hosty.shared.backend.playit_manager import PlayitManager
 from hosty.shared.backend.preferences_manager import PreferencesManager
+from hosty.shared.backend.server_process import ServerProcess
 from hosty.shared.core.events import EventEmitter
+from hosty.shared.utils.constants import (
+    CONFIG_FILE,
+    DEFAULT_RAM_MB,
+    SERVERS_DIR,
+    get_required_java_version,
+)
 
 
 class ServerInfo:
     """Data class for server metadata."""
-    
+
     def __init__(self, data: dict):
         self.id: str = data.get("id", str(uuid.uuid4()))
         self.name: str = data.get("name", "Unnamed Server")
@@ -38,14 +40,14 @@ class ServerInfo:
         self.created_at: str = data.get("created_at", datetime.now().isoformat())
         self.path: str = data.get("path", "")
         self.autostart: bool = data.get("autostart", False)
-    
+
     @property
     def server_dir(self) -> Path:
         """Get the server directory path."""
         if self.path:
             return Path(self.path)
         return SERVERS_DIR / self.id
-    
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -65,7 +67,7 @@ class ServerManager(EventEmitter):
     """
     Manages all server instances: CRUD, persistence, and process management.
     """
-    
+
     def __init__(self):
         super().__init__()
         self._servers: dict[str, ServerInfo] = {}
@@ -76,107 +78,108 @@ class ServerManager(EventEmitter):
         self.playit_manager = PlayitManager()
         self.preferences = PreferencesManager()
         self._load()
-    
+
     def _load(self):
         """Load servers from persisted JSON."""
         if CONFIG_FILE.exists():
             try:
-                with open(CONFIG_FILE, "r") as f:
+                with open(CONFIG_FILE) as f:
                     data = json.load(f)
                 for entry in data.get("servers", []):
                     info = ServerInfo(entry)
                     self._servers[info.id] = info
             except Exception as e:
                 print(f"Failed to load servers: {e}")
-    
+
     def _save(self):
         """Persist servers to JSON."""
-        data = {
-            "servers": [s.to_dict() for s in self._servers.values()]
-        }
+        data = {"servers": [s.to_dict() for s in self._servers.values()]}
         try:
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(CONFIG_FILE, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"Failed to save servers: {e}")
-    
+
     @property
     def servers(self) -> list[ServerInfo]:
         """Get all servers sorted by creation date."""
         return sorted(self._servers.values(), key=lambda s: s.created_at)
-    
-    def get_server(self, server_id: str) -> Optional[ServerInfo]:
+
+    def get_server(self, server_id: str) -> ServerInfo | None:
         """Get a server by ID."""
         return self._servers.get(server_id)
-    
-    def add_server(self, name: str, mc_version: str, loader_version: str = "",
-                   ram_mb: int = DEFAULT_RAM_MB) -> ServerInfo:
+
+    def add_server(
+        self, name: str, mc_version: str, loader_version: str = "", ram_mb: int = DEFAULT_RAM_MB
+    ) -> ServerInfo:
         """
         Create and register a new server.
         Does NOT install Fabric — call install_server() separately.
         """
         server_id = str(uuid.uuid4())
         java_ver = get_required_java_version(mc_version)
-        
-        info = ServerInfo({
-            "id": server_id,
-            "name": name,
-            "mc_version": mc_version,
-            "loader_version": loader_version,
-            "ram_mb": ram_mb,
-            "java_version": java_ver,
-            "path": str(SERVERS_DIR / server_id),
-        })
-        
+
+        info = ServerInfo(
+            {
+                "id": server_id,
+                "name": name,
+                "mc_version": mc_version,
+                "loader_version": loader_version,
+                "ram_mb": ram_mb,
+                "java_version": java_ver,
+                "path": str(SERVERS_DIR / server_id),
+            }
+        )
+
         # Create server directory
         info.server_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._servers[server_id] = info
         self._save()
-        self.emit_on_main_thread('server-added', server_id)
-        
+        self.emit_on_main_thread("server-added", server_id)
+
         return info
-    
+
     def rename_server(self, server_id: str, new_name: str):
         """Rename a server."""
         info = self._servers.get(server_id)
         if info:
             info.name = new_name
             self._save()
-            self.emit_on_main_thread('server-changed', server_id)
-    
+            self.emit_on_main_thread("server-changed", server_id)
+
     def set_server_icon(self, server_id: str, icon_path: str):
         """Set the icon for a server."""
         info = self._servers.get(server_id)
         if info:
             info.icon_path = icon_path
             self._save()
-            self.emit_on_main_thread('server-changed', server_id)
+            self.emit_on_main_thread("server-changed", server_id)
 
-    def get_autostart_server(self) -> Optional[ServerInfo]:
+    def get_autostart_server(self) -> ServerInfo | None:
         """Get the server configured to auto-start, if any."""
         for server in self._servers.values():
             if server.autostart:
                 return server
         return None
 
-    def set_server_autostart(self, server_id: str, autostart: bool) -> tuple[bool, Optional[str]]:
+    def set_server_autostart(self, server_id: str, autostart: bool) -> tuple[bool, str | None]:
         """Enable or disable autostart for a server. Returns (success, error_msg)."""
         info = self._servers.get(server_id)
         if not info:
             return False, "Server not found."
-            
+
         if autostart:
             existing = self.get_autostart_server()
             if existing and existing.id != server_id:
                 return False, f"Server '{existing.name}' is already configured to start on startup."
-                
+
         info.autostart = autostart
         self._save()
-        self.emit_on_main_thread('server-changed', server_id)
+        self.emit_on_main_thread("server-changed", server_id)
         return True, None
-    
+
     def update_server_ram(self, server_id: str, ram_mb: int):
         """Update RAM allocation for a server."""
         info = self._servers.get(server_id)
@@ -186,7 +189,7 @@ class ServerManager(EventEmitter):
             proc = self._processes.get(server_id)
             if proc:
                 proc.ram_mb = ram_mb
-            self.emit_on_main_thread('server-changed', server_id)
+            self.emit_on_main_thread("server-changed", server_id)
 
     def update_server_version(self, server_id: str, mc_version: str) -> tuple[bool, str]:
         """Update the Minecraft and Fabric version for a server."""
@@ -196,17 +199,17 @@ class ServerManager(EventEmitter):
         self,
         server_id: str,
         mc_version: str,
-        loader_version: Optional[str] = None,
+        loader_version: str | None = None,
         progress_callback=None,
-        compatibility_plan: Optional[dict] = None,
+        compatibility_plan: dict | None = None,
     ) -> tuple[bool, str]:
         """Install a new Minecraft/Fabric runtime, update compatible content, and isolate incompatible content."""
         from hosty.shared.utils.constants import get_required_java_version
-        
+
         info = self._servers.get(server_id)
         if not info:
             return False, "Server not found"
-            
+
         process = self._processes.get(server_id)
         if process and process.is_running:
             return False, "Cannot update version while server is running"
@@ -219,7 +222,7 @@ class ServerManager(EventEmitter):
         try:
             java_req = get_required_java_version(mc_version)
         except Exception:
-            java_req = 21 # Default fallback
+            java_req = 21  # Default fallback
 
         root = info.server_dir
         root.mkdir(parents=True, exist_ok=True)
@@ -292,11 +295,9 @@ class ServerManager(EventEmitter):
         existing_process = self._processes.get(server_id)
         if existing_process:
             existing_process.java_path = (
-                self.java_manager.get_java_path(java_req)
-                or self.java_manager.get_java_for_mc(mc_version)
-                or "java"
+                self.java_manager.get_java_path(java_req) or self.java_manager.get_java_for_mc(mc_version) or "java"
             )
-        self.emit_on_main_thread('server-changed', server_id)
+        self.emit_on_main_thread("server-changed", server_id)
         progress(1.0, "Server runtime updated")
 
         disabled_count = sum(len(v) for v in disabled.values())
@@ -309,7 +310,7 @@ class ServerManager(EventEmitter):
 
     def _json_file(self, path: Path) -> dict:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except Exception:
@@ -338,7 +339,7 @@ class ServerManager(EventEmitter):
                 return alt
             idx += 1
 
-    def _move_if_present(self, source_dir: Path, filename: str, dest_dir: Path) -> Optional[Path]:
+    def _move_if_present(self, source_dir: Path, filename: str, dest_dir: Path) -> Path | None:
         name = Path(str(filename or "")).name
         if not name:
             return None
@@ -402,11 +403,7 @@ class ServerManager(EventEmitter):
             if not dep_key or not isinstance(parents, list):
                 continue
             parent_keys = sorted(
-                {
-                    Path(str(parent or "")).name.casefold()
-                    for parent in parents
-                    if Path(str(parent or "")).name
-                }
+                {Path(str(parent or "")).name.casefold() for parent in parents if Path(str(parent or "")).name}
             )
             if parent_keys:
                 cleaned[dep_key] = parent_keys
@@ -415,11 +412,7 @@ class ServerManager(EventEmitter):
     def _write_mod_dependency_state(self, root: Path, required_by: dict[str, list[str]]) -> None:
         cleaned = {
             Path(str(dep)).name.casefold(): sorted(
-                {
-                    Path(str(parent)).name.casefold()
-                    for parent in parents
-                    if Path(str(parent)).name
-                }
+                {Path(str(parent)).name.casefold() for parent in parents if Path(str(parent)).name}
             )
             for dep, parents in required_by.items()
             if Path(str(dep)).name and parents
@@ -437,11 +430,7 @@ class ServerManager(EventEmitter):
         old_parent = Path(str(old_parent_filename or "")).name.casefold()
         new_parent = Path(str(new_parent_filename or "")).name.casefold()
         state = self._tracked_mod_dependency_state(root)
-        old_dep_names = {
-            dep_name
-            for dep_name, parents in state.items()
-            if old_parent and old_parent in parents
-        }
+        old_dep_names = {dep_name for dep_name, parents in state.items() if old_parent and old_parent in parents}
 
         for dep_name, parents in list(state.items()):
             filtered = [parent for parent in parents if parent != old_parent]
@@ -492,7 +481,9 @@ class ServerManager(EventEmitter):
             "download_url": str(getattr(version, "download_url", "") or ""),
         }
 
-    def _incompatible_entry(self, project_id: str, meta: dict, target_mc_version: str, kind_label: str) -> dict[str, str]:
+    def _incompatible_entry(
+        self, project_id: str, meta: dict, target_mc_version: str, kind_label: str
+    ) -> dict[str, str]:
         return {
             "title": str((meta or {}).get("title") or project_id),
             "filename": str((meta or {}).get("filename", "")),
@@ -542,7 +533,9 @@ class ServerManager(EventEmitter):
                 entry["filename"] = ", ".join([str(Path(str(f)).name) for f in (meta.get("mods") or [])])
                 plan["incompatible"]["modpacks"].append(entry)
             elif version is None:
-                plan["unknown"]["modpacks"].append(self._incompatible_entry(str(project_id), meta, target_mc_version, "modpack"))
+                plan["unknown"]["modpacks"].append(
+                    self._incompatible_entry(str(project_id), meta, target_mc_version, "modpack")
+                )
             else:
                 entry = self._version_entry(str(project_id), meta, version)
                 entry["previous_mods"] = json.dumps([str(Path(str(f)).name) for f in (meta.get("mods") or [])])
@@ -553,9 +546,13 @@ class ServerManager(EventEmitter):
                 continue
             version = best_version(str(project_id), "mods")
             if version is False:
-                plan["incompatible"]["mods"].append(self._incompatible_entry(str(project_id), meta, target_mc_version, "mod"))
+                plan["incompatible"]["mods"].append(
+                    self._incompatible_entry(str(project_id), meta, target_mc_version, "mod")
+                )
             elif version is None:
-                plan["unknown"]["mods"].append(self._incompatible_entry(str(project_id), meta, target_mc_version, "mod"))
+                plan["unknown"]["mods"].append(
+                    self._incompatible_entry(str(project_id), meta, target_mc_version, "mod")
+                )
             else:
                 plan["compatible"]["mods"].append(self._version_entry(str(project_id), meta, version))
 
@@ -564,15 +561,19 @@ class ServerManager(EventEmitter):
                 continue
             version = best_version(str(project_id), "datapacks")
             if version is False:
-                plan["incompatible"]["datapacks"].append(self._incompatible_entry(str(project_id), meta, target_mc_version, "datapack"))
+                plan["incompatible"]["datapacks"].append(
+                    self._incompatible_entry(str(project_id), meta, target_mc_version, "datapack")
+                )
             elif version is None:
-                plan["unknown"]["datapacks"].append(self._incompatible_entry(str(project_id), meta, target_mc_version, "datapack"))
+                plan["unknown"]["datapacks"].append(
+                    self._incompatible_entry(str(project_id), meta, target_mc_version, "datapack")
+                )
             else:
                 plan["compatible"]["datapacks"].append(self._version_entry(str(project_id), meta, version))
 
         return plan
 
-    def _find_file_case_insensitive(self, directory: Path, filename: str) -> Optional[Path]:
+    def _find_file_case_insensitive(self, directory: Path, filename: str) -> Path | None:
         name = Path(str(filename or "")).name
         if not name:
             return None
@@ -593,7 +594,8 @@ class ServerManager(EventEmitter):
 
         mods = self._tracked_mod_state(root)
         kept_mods = {
-            pid: meta for pid, meta in mods.items()
+            pid: meta
+            for pid, meta in mods.items()
             if Path(str((meta or {}).get("filename", ""))).name.casefold() != name
         }
         if kept_mods != mods:
@@ -612,7 +614,9 @@ class ServerManager(EventEmitter):
         if changed:
             self._write_json_file(root / ".hosty-modpacks.json", {"installed_projects": packs})
 
-    def apply_compatible_component_updates(self, server_id: str, target_mc_version: str, plan: Optional[dict] = None) -> tuple[int, int]:
+    def apply_compatible_component_updates(
+        self, server_id: str, target_mc_version: str, plan: dict | None = None
+    ) -> tuple[int, int]:
         """Download compatible target-version Modrinth files and update Hosty tracking."""
         info = self._servers.get(server_id)
         if not info:
@@ -696,7 +700,9 @@ class ServerManager(EventEmitter):
                     dep_project_id = str(getattr(dep, "project_id", "") or "").strip()
                     if dep_project_id:
                         mod_state[dep_project_id] = {
-                            "title": str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id).strip(),
+                            "title": str(
+                                getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id
+                            ).strip(),
                             "version_id": str(getattr(dep, "version_id", "") or "").strip(),
                             "version_number": str(getattr(dep, "version_number", "") or "").strip(),
                             "filename": dep_name,
@@ -708,10 +714,7 @@ class ServerManager(EventEmitter):
                     root,
                     old_filename,
                     filename,
-                    [
-                        dep for dep in deps
-                        if Path(str(dep.filename)).name.casefold() not in managed_mods
-                    ],
+                    [dep for dep in deps if Path(str(dep.filename)).name.casefold() not in managed_mods],
                 )
                 if old_filename and Path(old_filename).name.casefold() != filename.casefold():
                     old = self._find_file_case_insensitive(mods_dir, old_filename)
@@ -762,7 +765,7 @@ class ServerManager(EventEmitter):
         self,
         server_id: str,
         target_mc_version: str,
-        plan: Optional[dict] = None,
+        plan: dict | None = None,
     ) -> dict[str, list[dict[str, str]]]:
         """Move tracked Modrinth mods/modpack files/datapacks that lack a compatible target version."""
         info = self._servers.get(server_id)
@@ -922,7 +925,7 @@ class ServerManager(EventEmitter):
 
     @staticmethod
     def is_version_older(candidate: str, current: str) -> bool:
-        def parse(value: str) -> Optional[tuple[int, ...]]:
+        def parse(value: str) -> tuple[int, ...] | None:
             parts = re.findall(r"\d+", str(value or ""))
             if not parts:
                 return None
@@ -947,9 +950,9 @@ class ServerManager(EventEmitter):
 
         self._servers[info.id] = info
         self._save()
-        self.emit_on_main_thread('server-added', info.id)
+        self.emit_on_main_thread("server-added", info.id)
         return True
-    
+
     def delete_server(self, server_id: str, delete_files: bool = True):
         """Delete a server. Optionally delete its files."""
         info = self._servers.get(server_id)
@@ -958,29 +961,29 @@ class ServerManager(EventEmitter):
 
         if self.playit_manager.is_running_for(server_id):
             self.playit_manager.stop()
-        
+
         # Stop if running
         process = self._processes.get(server_id)
         if process and process.is_running:
             process.kill()
-        
+
         if server_id in self._processes:
             del self._processes[server_id]
-        
+
         # Delete files
         if delete_files and info.server_dir.exists():
             shutil.rmtree(info.server_dir, ignore_errors=True)
-        
+
         del self._servers[server_id]
         self._save()
-        self.emit_on_main_thread('server-removed', server_id)
-    
-    def get_process(self, server_id: str) -> Optional[ServerProcess]:
+        self.emit_on_main_thread("server-removed", server_id)
+
+    def get_process(self, server_id: str) -> ServerProcess | None:
         """Get or create a ServerProcess for a server."""
         info = self._servers.get(server_id)
         if not info:
             return None
-        
+
         if server_id not in self._processes:
             java_path = self.java_manager.get_java_for_mc(info.mc_version)
             if not java_path:
@@ -992,32 +995,32 @@ class ServerManager(EventEmitter):
             if config:
                 config.load()
                 max_players = config.get_int("max-players", 20)
-            
+
             self._processes[server_id] = ServerProcess(
                 server_dir=str(info.server_dir),
                 java_path=java_path or "java",
                 ram_mb=info.ram_mb,
                 max_players=max_players,
             )
-        
+
         return self._processes[server_id]
 
-    def get_existing_process(self, server_id: str) -> Optional[ServerProcess]:
+    def get_existing_process(self, server_id: str) -> ServerProcess | None:
         """Get an existing ServerProcess without creating a new one."""
         return self._processes.get(server_id)
-    
-    def get_config(self, server_id: str) -> Optional[ConfigManager]:
+
+    def get_config(self, server_id: str) -> ConfigManager | None:
         """Get a ConfigManager for a server's server.properties."""
         info = self._servers.get(server_id)
         if not info:
             return None
         return ConfigManager(str(info.server_dir))
-    
+
     def is_any_server_running(self) -> bool:
         """Check if any server is currently running."""
         return any(p.is_running for p in self._processes.values())
 
-    def get_running_server_id(self) -> Optional[str]:
+    def get_running_server_id(self) -> str | None:
         """Return the server id whose process is running, or None."""
         for server_id, process in self._processes.items():
             if process.is_running:
@@ -1051,7 +1054,7 @@ class ServerManager(EventEmitter):
         if not server_id:
             return False
         return int(self._mods_operation_counts.get(server_id, 0)) > 0
-        
+
     def stop_all(self):
         """Stop all running servers."""
         self.playit_manager.stop()
@@ -1225,6 +1228,7 @@ class ServerManager(EventEmitter):
                 shutil.rmtree(dst, ignore_errors=True)
 
             from hosty.shared.utils.nbt_utils import get_world_info
+
             seed, wtype = get_world_info(src)
 
             shutil.copytree(src, dst)
@@ -1319,7 +1323,8 @@ class ServerManager(EventEmitter):
         return True, backup_path.name
 
     def create_full_backup(self, server_id: str) -> tuple[bool, str]:
-        """Create a zip backup containing everything in the server directory, specifically tailored for version updates."""
+        """Create a zip backup containing everything in the server directory,
+        specifically tailored for version updates."""
         info = self.get_server(server_id)
         if not info:
             return False, "Server not found"
@@ -1336,7 +1341,7 @@ class ServerManager(EventEmitter):
         backups_dir.mkdir(parents=True, exist_ok=True)
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        
+
         # Tag the backup with the current server version
         version = info.mc_version if info.mc_version else "unknown"
         backup_path = backups_dir / f"hosty-full-backup-{version}-{stamp}.zip"
@@ -1349,9 +1354,9 @@ class ServerManager(EventEmitter):
                     # Skip the backups folder itself
                     if hasattr(item, "is_relative_to") and item.is_relative_to(backups_dir):
                         continue
-                    elif str(item).startswith(str(backups_dir)): # fallback
+                    elif str(item).startswith(str(backups_dir)):  # fallback
                         continue
-                        
+
                     arc = item.relative_to(root)
                     zf.write(item, arcname=str(arc).replace("\\", "/"))
         except Exception as e:
@@ -1360,9 +1365,10 @@ class ServerManager(EventEmitter):
         return True, backup_path.name
 
     def restore_world_backup(self, server_id: str, zip_path: Path) -> tuple[bool, str]:
-        """Restore a zip backup. If it's a full backup, it overwrites everything except backups. Otherwise, it just replaces worlds."""
-        import tempfile
+        """Restore a zip backup. If it's a full backup, it overwrites everything
+        except backups. Otherwise, it just replaces worlds."""
         import shutil
+        import tempfile
 
         info = self.get_server(server_id)
         if not info:
@@ -1402,7 +1408,7 @@ class ServerManager(EventEmitter):
                             shutil.rmtree(item, ignore_errors=True)
                         else:
                             item.unlink(missing_ok=True)
-                    
+
                     for item in tmp_root.iterdir():
                         dst = root / item.name
                         if item.is_dir():
@@ -1419,10 +1425,25 @@ class ServerManager(EventEmitter):
                     for item in root.iterdir():
                         if not item.is_dir():
                             continue
-                        if (item / "level.dat").exists() or item.name.casefold() == level_name.casefold() or any(
-                            (item / marker).exists()
-                            for marker in (
-                                "region", "data", "playerdata", "poi", "entities", "stats", "advancements", "dimensions", "DIM-1", "DIM1", "session.lock", "uid.dat",
+                        if (
+                            (item / "level.dat").exists()
+                            or item.name.casefold() == level_name.casefold()
+                            or any(
+                                (item / marker).exists()
+                                for marker in (
+                                    "region",
+                                    "data",
+                                    "playerdata",
+                                    "poi",
+                                    "entities",
+                                    "stats",
+                                    "advancements",
+                                    "dimensions",
+                                    "DIM-1",
+                                    "DIM1",
+                                    "session.lock",
+                                    "uid.dat",
+                                )
                             )
                         ):
                             shutil.rmtree(item, ignore_errors=True)

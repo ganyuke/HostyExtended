@@ -1,40 +1,29 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
 import ast
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
+import json
 import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-import zipfile
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Optional
 import uuid
+from pathlib import Path
+from typing import Any
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
-
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
-
-
+from gi.repository import Adw, GLib, Gtk
 
 from ..utils import *
 
+
 class ModsMixin:
-    def _begin_mod_operation(self) -> Optional[str]:
+    def _begin_mod_operation(self) -> str | None:
         if not self._server_info or not self._server_manager:
             return None
         server_id = str(self._server_info.id)
@@ -46,7 +35,7 @@ class ModsMixin:
         self._server_manager.begin_mod_operation(server_id)
         return token
 
-    def _end_mod_operation(self, token: Optional[str]) -> None:
+    def _end_mod_operation(self, token: str | None) -> None:
         if not token:
             return
         server_id = None
@@ -55,31 +44,31 @@ class ModsMixin:
         if server_id and self._server_manager:
             self._server_manager.end_mod_operation(server_id)
 
-    def _mod_dependency_state_path(self) -> Optional[Path]:
+    def _mod_dependency_state_path(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
         return root / ".hosty-mod-dependencies.json"
 
-    def _modpack_state_path(self) -> Optional[Path]:
+    def _modpack_state_path(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
         return root / ".hosty-modpacks.json"
 
-    def _individual_mod_state_path(self) -> Optional[Path]:
+    def _individual_mod_state_path(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
         return root / ".hosty-mod-installs.json"
 
-    def _datapack_state_path(self) -> Optional[Path]:
+    def _datapack_state_path(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
         return root / ".hosty-datapack-installs.json"
 
-    def _datapacks_dir(self) -> Optional[Path]:
+    def _datapacks_dir(self) -> Path | None:
         """Return the active datapacks directory (world/datapacks), creating parent if needed."""
         root = self._server_dir()
         if not root:
@@ -92,7 +81,7 @@ class ModsMixin:
                 for line in props.read_text(encoding="utf-8", errors="replace").splitlines():
                     stripped = line.strip()
                     if stripped.startswith("level-name="):
-                        world_name = stripped[len("level-name="):].strip() or "world"
+                        world_name = stripped[len("level-name=") :].strip() or "world"
                         break
             except Exception:
                 pass
@@ -103,7 +92,7 @@ class ModsMixin:
         if not path or not path.exists():
             return {"datapacks": {}}
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
             if not isinstance(raw, dict):
                 return {"datapacks": {}}
@@ -169,7 +158,7 @@ class ModsMixin:
         state = self._read_datapack_state()
         return pid in state.get("datapacks", {})
 
-    def _make_datapack_row(self, project_id: str, meta: dict) -> "Adw.ActionRow":
+    def _make_datapack_row(self, project_id: str, meta: dict) -> Adw.ActionRow:
         title = str(meta.get("title", "")).strip() or project_id
         filename = str(meta.get("filename", "")).strip()
         version_id = str(meta.get("version_id", "")).strip()
@@ -212,7 +201,7 @@ class ModsMixin:
 
         dialog = Adw.AlertDialog()
         dialog.set_heading("Delete datapack?")
-        dialog.set_body(f"Remove \"{title}\" from this server?")
+        dialog.set_body(f'Remove "{title}" from this server?')
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
         dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -251,7 +240,7 @@ class ModsMixin:
             return {"installed_projects": {}}
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
             if isinstance(raw, dict):
                 projects = raw.get("installed_projects")
@@ -364,7 +353,7 @@ class ModsMixin:
             return {"mods": {}}
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
             if not isinstance(raw, dict):
                 return {"mods": {}}
@@ -447,7 +436,7 @@ class ModsMixin:
         version_id: str,
         version_number: str = "",
         title: str = "",
-        mod_files: Optional[list[str]] = None,
+        mod_files: list[str] | None = None,
     ) -> None:
         pid = str(project_id).strip()
         if not pid:
@@ -476,7 +465,7 @@ class ModsMixin:
         entries = self._modpack_entries()
         return pid in entries
 
-    def _find_mod_jar_path(self, mods_dir: Path, filename: str) -> Optional[Path]:
+    def _find_mod_jar_path(self, mods_dir: Path, filename: str) -> Path | None:
         """Resolve a jar path by filename, with case-insensitive fallback."""
         name = str(filename).strip()
         if not name:
@@ -531,8 +520,7 @@ class ModsMixin:
         missing = [
             (project_id, entry)
             for project_id, entry in entries.items()
-            if not str(entry.get("version_number", "")).strip()
-            and str(entry.get("version_id", "")).strip()
+            if not str(entry.get("version_number", "")).strip() and str(entry.get("version_id", "")).strip()
         ]
         if not missing:
             return
@@ -552,10 +540,7 @@ class ModsMixin:
                 if not version_number and version_id:
                     raw = modrinth_client.get_version(version_id)
                     if isinstance(raw, dict):
-                        version_number = (
-                            str(raw.get("version_number", "")).strip()
-                            or str(raw.get("name", "")).strip()
-                        )
+                        version_number = str(raw.get("version_number", "")).strip() or str(raw.get("name", "")).strip()
                     if version_number:
                         changed = True
 
@@ -587,7 +572,7 @@ class ModsMixin:
             return {"required_by": {}}
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
             if isinstance(raw, dict):
                 req = raw.get("required_by")
@@ -599,13 +584,7 @@ class ModsMixin:
                             continue
                         if not isinstance(parents, list):
                             continue
-                        parent_keys = sorted(
-                            {
-                                str(p).strip().lower()
-                                for p in parents
-                                if str(p).strip()
-                            }
-                        )
+                        parent_keys = sorted({str(p).strip().lower() for p in parents if str(p).strip()})
                         if parent_keys:
                             cleaned[dep_key] = parent_keys
                     return {"required_by": cleaned}
@@ -709,7 +688,7 @@ class ModsMixin:
 
         # Collect all dependencies that need to be checked
         deps_to_check = []
-        
+
         # Find dependencies that this mod required
         for dep_key, parents in req.items():
             if removed_key not in parents:
@@ -735,7 +714,7 @@ class ModsMixin:
         # Try to find metadata for this jar
         filename_lower = jar.name.lower()
         mod_state = self._read_individual_mod_state().get("mods", {})
-        
+
         project_id = None
         version_id = None
         version_number = None
@@ -750,11 +729,11 @@ class ModsMixin:
 
         row = Adw.ActionRow(title=mod_title or jar.name)
         subtitle_bits = [_format_size(jar.stat().st_size)]
-        
+
         dependents = self._dependency_dependents(jar.name)
         if dependents:
             subtitle_bits.append("Dependency")
-            
+
         if version_number:
             subtitle_bits.append(f"version {version_number}")
         elif version_id:
@@ -762,7 +741,7 @@ class ModsMixin:
 
         row.set_subtitle(" · ".join(subtitle_bits))
         row.set_activatable(False)
-        
+
         if project_id:
             open_btn = self._icon_button(
                 "web-browser-symbolic",
@@ -823,9 +802,7 @@ class ModsMixin:
 
         dialog = Adw.AlertDialog()
         dialog.set_heading("Delete modpack?")
-        dialog.set_body(
-            f"Remove \"{title}\" and delete its managed mod files from this server?"
-        )
+        dialog.set_body(f'Remove "{title}" and delete its managed mod files from this server?')
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
         dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -956,10 +933,6 @@ class ModsMixin:
             blocked = 0
             for project_id, meta in individual_state.items():
                 current_version = str((meta or {}).get("version_id", "")).strip()
-                # Get all versions and filter to only mods (have loaders)
-                all_versions = modrinth_client.get_project_versions(project_id)
-                mod_versions = [v for v in all_versions if v.loaders and len(v.loaders) > 0]
-                
                 # Find compatible mod version with fabric loader
                 latest = modrinth_client.find_compatible_version(
                     project_id,
@@ -968,11 +941,11 @@ class ModsMixin:
                 )
                 if not latest:
                     continue
-                
+
                 # Ensure the compatible version is actually a mod (has loaders)
                 if not latest.loaders or len(latest.loaders) == 0:
                     continue
-                
+
                 # Update metadata if missing (backfilling)
                 if not (meta or {}).get("version_number") or not (meta or {}).get("title"):
                     title_to_record = (meta or {}).get("title")
@@ -980,13 +953,15 @@ class ModsMixin:
                         p_data = modrinth_client.get_project(project_id)
                         if p_data:
                             title_to_record = p_data.get("title")
-                    
+
                     self._record_individual_mod_install(
                         project_id,
                         title_to_record or project_id,
                         current_version,
                         (meta or {}).get("filename"),
-                        version_number=(meta or {}).get("version_number") or latest.version_number if latest.version_id == current_version else (meta or {}).get("version_number"),
+                        version_number=(meta or {}).get("version_number") or latest.version_number
+                        if latest.version_id == current_version
+                        else (meta or {}).get("version_number"),
                     )
                     refresh_needed = True
 
@@ -1027,13 +1002,15 @@ class ModsMixin:
                         p_data = modrinth_client.get_project(project_id)
                         if p_data:
                             title_to_record = p_data.get("title")
-                    
+
                     self._record_datapack_install(
                         project_id,
                         title_to_record or project_id,
                         current_version,
                         (meta or {}).get("filename"),
-                        version_number=(meta or {}).get("version_number") or latest.version_number if latest.version_id == current_version else (meta or {}).get("version_number"),
+                        version_number=(meta or {}).get("version_number") or latest.version_number
+                        if latest.version_id == current_version
+                        else (meta or {}).get("version_number"),
                     )
                     refresh_needed = True
 
@@ -1098,7 +1075,9 @@ class ModsMixin:
                 if datapack_updates:
                     body_parts.append(f"Found {len(datapack_updates)} datapack update(s).")
                 if blocked > 0:
-                    body_parts.append(f"{blocked} standalone update(s) were skipped because dependencies are managed by a modpack.")
+                    body_parts.append(
+                        f"{blocked} standalone update(s) were skipped because dependencies are managed by a modpack."
+                    )
                 if listing:
                     body_parts.append(listing)
 
@@ -1143,13 +1122,12 @@ class ModsMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
-
     def _apply_mod_updates(
         self,
         modpack_updates: list,
         standalone_updates: list,
-        mod_operation_token: Optional[str] = None,
-        datapack_updates: Optional[list] = None,
+        mod_operation_token: str | None = None,
+        datapack_updates: list | None = None,
     ) -> None:
         from hosty.shared.backend import modrinth_client
 
@@ -1177,16 +1155,12 @@ class ModsMixin:
             )
             try:
                 previous_mods = {
-                    str(m).strip().lower()
-                    for m in (entry.get("mods") or [])
-                    if str(m).strip().lower().endswith(".jar")
+                    str(m).strip().lower() for m in (entry.get("mods") or []) if str(m).strip().lower().endswith(".jar")
                 }
 
                 def on_progress(done: int, total: int, rel_path: str):
                     GLib.idle_add(
-                        lambda d=done, t=total: self._set_mod_update_row_subtitle(
-                            f"Updating {pack_title}: {d}/{t}"
-                        )
+                        lambda d=done, t=total: self._set_mod_update_row_subtitle(f"Updating {pack_title}: {d}/{t}")
                     )
 
                 result = modrinth_client.install_modpack(
@@ -1231,19 +1205,15 @@ class ModsMixin:
             )
             try:
                 old_name = str((meta or {}).get("filename", "")).strip()
-                deps_to_install = [
-                    dep
-                    for dep in deps
-                    if str(dep.filename).strip().lower() not in managed_mods
-                ]
-                
+                deps_to_install = [dep for dep in deps if str(dep.filename).strip().lower() not in managed_mods]
+
                 # Get old dependencies from state before updating
                 old_dep_names = set()
                 dep_state = self._read_mod_dependency_state()
                 for dep_key, parents in dep_state.get("required_by", {}).items():
                     if old_name.lower() in [p.lower() for p in parents]:
                         old_dep_names.add(dep_key)
-                
+
                 # Download new dependencies
                 new_dep_names = {str(dep.filename).strip().lower() for dep in deps_to_install}
                 for dep in deps_to_install:
@@ -1257,7 +1227,8 @@ class ModsMixin:
                         if dep_path and dep_path.exists():
                             # Check if any other mod needs this dependency
                             remaining_parents = [
-                                p for p in dep_state.get("required_by", {}).get(removed_dep, [])
+                                p
+                                for p in dep_state.get("required_by", {}).get(removed_dep, [])
                                 if p.lower() != old_name.lower()
                             ]
                             if not remaining_parents:
@@ -1333,7 +1304,6 @@ class ModsMixin:
 
         GLib.idle_add(finish_ui)
 
-
     def _confirm_delete_mod(self, path: Path, name: str):
         if self._is_running():
             self._alert("Server is running", "Stop the server before removing mods.")
@@ -1344,7 +1314,7 @@ class ModsMixin:
         def do_delete():
             self._soft_delete_with_undo(
                 path,
-                f"mod \"{name}\"",
+                f'mod "{name}"',
                 on_refresh=self._rebuild_lists,
                 on_finalize=lambda: self._remove_mod_from_mod_states(name),
             )
@@ -1361,9 +1331,7 @@ class ModsMixin:
                 more = f"\n- and {len(dependents) - 6} more"
             dialog.set_heading("Delete dependency mod?")
             dialog.set_body(
-                f"The following mods depend on \"{name}\":\n\n"
-                f"{preview}{more}\n\n"
-                "Are you sure you want to proceed?"
+                f'The following mods depend on "{name}":\n\n{preview}{more}\n\nAre you sure you want to proceed?'
             )
         else:
             dialog.set_heading("Delete mod?")
@@ -1380,4 +1348,3 @@ class ModsMixin:
 
         dialog.connect("response", on_response)
         dialog.present(self.get_root())
-

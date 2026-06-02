@@ -1,6 +1,7 @@
 """
 Central constants for Hosty application.
 """
+
 import os
 import re
 import sys
@@ -82,16 +83,14 @@ def get_adoptium_jre_download_info(java_version: int) -> tuple[str, str]:
         image_type = "jre"
         archive_type = "tar.gz"
 
-    url = (
-        f"{ADOPTIUM_API_BASE}/{java_version}/ga/"
-        f"{os_name}/{arch}/{image_type}/hotspot/normal/eclipse"
-    )
+    url = f"{ADOPTIUM_API_BASE}/{java_version}/ga/{os_name}/{arch}/{image_type}/hotspot/normal/eclipse"
     return url, archive_type
 
 
 def get_adoptium_jre_url(java_version: int) -> str:
     """Backward-compatible helper that returns only the Adoptium JRE URL."""
     return get_adoptium_jre_download_info(java_version)[0]
+
 
 DEFAULT_JAVA_VERSION = 21
 
@@ -106,6 +105,7 @@ def _parse_mc_version_tuple(mc_version: str) -> tuple[int, int, int] | None:
     while len(nums) < 3:
         nums.append(0)
     return nums[0], nums[1], nums[2]
+
 
 def get_required_java_version(mc_version: str) -> int:
     """Determine required Java version for Fabric-compatible Minecraft ranges."""
@@ -131,6 +131,7 @@ def get_required_java_version(mc_version: str) -> int:
         return 8
 
     return DEFAULT_JAVA_VERSION
+
 
 # Default server.properties values
 DEFAULT_SERVER_PROPERTIES = {
@@ -162,7 +163,6 @@ COMMON_COMMANDS = [
     {"label": "Save All", "command": "/save-all", "needs_args": False},
     {"label": "List Players", "command": "/list", "needs_args": False},
     {"label": "Say Message...", "command": "/say ", "needs_args": True},
-
     {"label": "Op Player...", "command": "/op ", "needs_args": True},
     {"label": "Deop Player...", "command": "/deop ", "needs_args": True},
     {"label": "Kick Player...", "command": "/kick ", "needs_args": True},
@@ -170,16 +170,13 @@ COMMON_COMMANDS = [
     {"label": "Pardon Player...", "command": "/pardon ", "needs_args": True},
     {"label": "Whitelist Add...", "command": "/whitelist add ", "needs_args": True},
     {"label": "Whitelist Remove...", "command": "/whitelist remove ", "needs_args": True},
-
     {"label": "Gamemode Survival...", "command": "/gamemode survival ", "needs_args": True},
     {"label": "Gamemode Creative...", "command": "/gamemode creative ", "needs_args": True},
     {"label": "Gamemode Spectator...", "command": "/gamemode spectator ", "needs_args": True},
-
     {"label": "Set Difficulty Peaceful", "command": "/difficulty peaceful", "needs_args": False},
     {"label": "Set Difficulty Easy", "command": "/difficulty easy", "needs_args": False},
     {"label": "Set Difficulty Normal", "command": "/difficulty normal", "needs_args": False},
     {"label": "Set Difficulty Hard", "command": "/difficulty hard", "needs_args": False},
-
     {"label": "Set Time Day", "command": "/time set day", "needs_args": False},
     {"label": "Set Time Night", "command": "/time set night", "needs_args": False},
     {"label": "Set Weather Clear", "command": "/weather clear", "needs_args": False},
@@ -213,6 +210,7 @@ LEVEL_TYPE_NAMES = {
     "minecraft\\:single_biome_surface": "Single Biome",
 }
 
+
 # Server status
 class ServerStatus:
     STOPPED = "stopped"
@@ -220,18 +218,22 @@ class ServerStatus:
     RUNNING = "running"
     STOPPING = "stopping"
 
+
 # Default RAM allocation in MB
 MIN_RAM_MB = 512
+
 
 def get_system_ram_mb() -> int:
     """Return the total system RAM in Megabytes."""
     try:
         import psutil
+
         return int(psutil.virtual_memory().total / (1024 * 1024))
     except Exception:
         if sys.platform == "win32":
             try:
                 import ctypes
+
                 class MEMORYSTATUSEX(ctypes.Structure):
                     _fields_ = [
                         ("dwLength", ctypes.c_ulong),
@@ -244,6 +246,7 @@ def get_system_ram_mb() -> int:
                         ("ullAvailVirtual", ctypes.c_ulonglong),
                         ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
                     ]
+
                 stat = MEMORYSTATUSEX()
                 stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
                 ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
@@ -252,10 +255,11 @@ def get_system_ram_mb() -> int:
                 pass
         else:
             try:
-                return int(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 * 1024))
+                return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 * 1024))
             except Exception:
                 pass
     return 16384  # Default fallback if all fails (16GB)
+
 
 def _get_max_ram_mb() -> int:
     sys_ram = get_system_ram_mb()
@@ -271,6 +275,6 @@ def _get_max_ram_mb() -> int:
         headroom = 2048
     return max(MIN_RAM_MB, sys_ram - headroom)
 
+
 MAX_RAM_MB = _get_max_ram_mb()
 DEFAULT_RAM_MB = min(2048, MAX_RAM_MB)
-

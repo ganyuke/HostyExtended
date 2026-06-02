@@ -1,46 +1,35 @@
 """
 ConnectView - Server connection tools (playit.gg tunnel).
 """
+
 from __future__ import annotations
 
-import json
-import socket
-import subprocess
-import sys
-import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Adw, Gdk, GLib
+from gi.repository import Adw, Gtk
 
-from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
 from hosty.shared.backend.server_manager import ServerInfo, ServerManager
-from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
-
 
 PLAYIT_DASHBOARD_URL = "https://playit.gg/account/tunnels"
 
 
-
-from .utils import *
 from .mixins import LocalIpMixin, PlayersMixin, PlayitMixin
+from .utils import *
+
 
 class ConnectView(Gtk.Box, LocalIpMixin, PlayersMixin, PlayitMixin):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self._server_info: Optional[ServerInfo] = None
-        self._server_manager: Optional[ServerManager] = None
-        self._status_handler_id: Optional[int] = None
-        self._endpoint_handler_id: Optional[int] = None
-        self._manager_changed_id: Optional[int] = None
+        self._server_info: ServerInfo | None = None
+        self._server_manager: ServerManager | None = None
+        self._status_handler_id: int | None = None
+        self._endpoint_handler_id: int | None = None
+        self._manager_changed_id: int | None = None
         self._cfg = {}
         self._suppress_config_updates = False
         self._start_in_progress = False
@@ -261,7 +250,7 @@ class ConnectView(Gtk.Box, LocalIpMixin, PlayersMixin, PlayitMixin):
         self._refresh_whitelist_status()
         self._refresh_player_lists()
 
-    def _server_dir(self) -> Optional[Path]:
+    def _server_dir(self) -> Path | None:
         if not self._server_info:
             return None
         return Path(self._server_info.server_dir)

@@ -1,37 +1,21 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
-import ast
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
 import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-import zipfile
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
-
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
-
-
+from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from ..utils import *
+
 
 class ModrinthMixin:
     def _push_modrinth_page(self, *_args) -> None:
@@ -55,16 +39,31 @@ class ModrinthMixin:
         header.set_show_start_title_buttons(True)
         header.set_show_end_title_buttons(False)
 
-        search_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        search_header.set_hexpand(True)
-        entry = Gtk.Entry()
+        search_outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        search_outer.add_css_class("modrinth-search-box")
+        search_outer.set_hexpand(True)
+        search_outer.set_valign(Gtk.Align.CENTER)
+
+        entry = Gtk.SearchEntry()
         entry.set_hexpand(True)
-        entry.set_placeholder_text("Search Modrinth…")
-        btn = Gtk.Button(label="Search")
-        btn.add_css_class("suggested-action")
-        search_header.append(entry)
-        search_header.append(btn)
-        header.set_title_widget(search_header)
+        entry.set_placeholder_text("Search Fabric mods…")
+        entry.add_css_class("modrinth-search-entry")
+        search_outer.append(entry)
+
+        search_spinner = Gtk.Spinner()
+        search_spinner.set_valign(Gtk.Align.CENTER)
+        search_spinner.set_margin_end(4)
+        search_spinner.set_visible(False)
+        search_outer.append(search_spinner)
+
+        filter_btn = Gtk.MenuButton()
+        filter_btn.set_icon_name("sliders-horizontal-symbolic")
+        filter_btn.add_css_class("flat")
+        filter_btn.add_css_class("modrinth-filter-btn")
+        filter_btn.set_tooltip_text("Filters")
+        search_outer.append(filter_btn)
+
+        header.set_title_widget(search_outer)
         tv.add_top_bar(header)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -73,8 +72,6 @@ class ModrinthMixin:
         outer.set_margin_end(18)
         outer.set_margin_top(12)
         outer.set_margin_bottom(18)
-
-        mc_ver = self._server_info.mc_version if self._server_info else ""
 
         controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
@@ -112,6 +109,43 @@ class ModrinthMixin:
         sort_dd.set_valign(Gtk.Align.CENTER)
         sort_dd.set_selected(1)
 
+        # Set up Popover for filters
+        filter_popover = Gtk.Popover()
+        filter_btn.set_popover(filter_popover)
+
+        popover_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        popover_content.set_margin_start(12)
+        popover_content.set_margin_end(12)
+        popover_content.set_margin_top(12)
+        popover_content.set_margin_bottom(12)
+
+        popover_title = Gtk.Label(label="Filters")
+        popover_title.add_css_class("title-4")
+        popover_title.set_halign(Gtk.Align.START)
+        popover_content.append(popover_title)
+
+        filter_grid = Gtk.Grid()
+        filter_grid.set_row_spacing(10)
+        filter_grid.set_column_spacing(12)
+
+        type_label = Gtk.Label(label="Type", xalign=0.0)
+        type_label.add_css_class("dim-label")
+        filter_grid.attach(type_label, 0, 0, 1, 1)
+        filter_grid.attach(type_dd, 1, 0, 1, 1)
+
+        cat_label = Gtk.Label(label="Category", xalign=0.0)
+        cat_label.add_css_class("dim-label")
+        filter_grid.attach(cat_label, 0, 1, 1, 1)
+        filter_grid.attach(cat_dd, 1, 1, 1, 1)
+
+        sort_label = Gtk.Label(label="Sort by", xalign=0.0)
+        sort_label.add_css_class("dim-label")
+        filter_grid.attach(sort_label, 0, 2, 1, 1)
+        filter_grid.attach(sort_dd, 1, 2, 1, 1)
+
+        popover_content.append(filter_grid)
+        filter_popover.set_child(popover_content)
+
         results = Gtk.ListBox()
         results.set_selection_mode(Gtk.SelectionMode.NONE)
         results.add_css_class("mod-results-list")
@@ -123,22 +157,9 @@ class ModrinthMixin:
         next_btn.add_css_class("flat")
         page_label = Gtk.Label(label="Page 1/1", xalign=0.0)
         page_label.add_css_class("dim-label")
-        results_label = Gtk.Label(label="", xalign=1.0)
-        results_label.add_css_class("dim-label")
-        results_label.set_ellipsize(Pango.EllipsizeMode.END)
-        results_label.set_max_width_chars(16)
         controls_row.append(prev_btn)
         controls_row.append(next_btn)
         controls_row.append(page_label)
-        controls_row.append(results_label)
-
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        controls_row.append(spacer)
-
-        controls_row.append(type_dd)
-        controls_row.append(cat_dd)
-        controls_row.append(sort_dd)
         outer.append(controls_row)
 
         page_size = 10
@@ -168,17 +189,20 @@ class ModrinthMixin:
             max_page = max(1, (total + page_size - 1) // page_size)
             page_label.set_label(f"Page {page}/{max_page}")
             prev_btn.set_sensitive((not state["busy"]) and state["offset"] > 0)
-            next_btn.set_sensitive(
-                (not state["busy"]) and (state["offset"] + page_size < total)
-            )
+            next_btn.set_sensitive((not state["busy"]) and (state["offset"] + page_size < total))
 
         def set_busy(busy: bool):
             state["busy"] = busy
-            entry.set_sensitive(not busy)
-            btn.set_sensitive(not busy)
+            # Never disable the entry itself — that steals focus and kills typing
+            filter_btn.set_sensitive(not busy)
             type_dd.set_sensitive(not busy)
             cat_dd.set_sensitive(not busy)
             sort_dd.set_sensitive(not busy)
+            search_spinner.set_visible(busy)
+            if busy:
+                search_spinner.start()
+            else:
+                search_spinner.stop()
             update_pager()
 
         def update_search_hint() -> None:
@@ -209,12 +233,10 @@ class ModrinthMixin:
         def finish_search(hits, total, err, version, qtxt):
             set_busy(False)
             if err:
-                results_label.set_label("Search failed")
                 results.append(self._empty_listbox_row("Could not fetch Modrinth results."))
                 return
             state["total"] = int(total)
             update_pager()
-            results_label.set_label(f"{state['total']:,} results")
             if not hits:
                 results.append(self._empty_listbox_row("No results"))
                 return
@@ -230,7 +252,6 @@ class ModrinthMixin:
             q = entry.get_text().strip()
             mc_version = self._server_info.mc_version if self._server_info else ""
             qtxt = q
-            results_label.set_label("Searching…")
             set_busy(True)
             offset = int(state["offset"])
             category = selected_category() or None
@@ -250,17 +271,9 @@ class ModrinthMixin:
                         server_side_only=(project_type != "datapack"),
                         project_type=project_type,
                     )
-                    GLib.idle_add(
-                        lambda h=hits, t=total, v=mc_version, qq=qtxt: finish_search(
-                            h, t, None, v, qq
-                        )
-                    )
+                    GLib.idle_add(lambda h=hits, t=total, v=mc_version, qq=qtxt: finish_search(h, t, None, v, qq))
                 except Exception as ex:
-                    GLib.idle_add(
-                        lambda e=str(ex), v=mc_version, qq=qtxt: finish_search(
-                            [], 0, e, v, qq
-                        )
-                    )
+                    GLib.idle_add(lambda e=str(ex), v=mc_version, qq=qtxt: finish_search([], 0, e, v, qq))
 
             threading.Thread(target=thread_fn, daemon=True).start()
 
@@ -281,7 +294,8 @@ class ModrinthMixin:
             do_search(reset=True)
             return False
 
-        btn.connect("clicked", trigger_search)
+        # SearchEntry has built-in clear; connect search-changed for live-as-you-type
+        entry.connect("search-changed", trigger_search)
         entry.connect("activate", trigger_search)
         prev_btn.connect("clicked", on_prev)
         next_btn.connect("clicked", on_next)
@@ -347,6 +361,7 @@ class ModrinthMixin:
         if "simple-voice-chat" in identifiers or "voice-chat" in identifiers:
             try:
                 from hosty.shared.backend.playit_config import load_playit_config
+
                 cfg = load_playit_config(self._server_info.server_dir)
                 endpoint = str(cfg.get("voicechat_endpoint", "")).strip()
             except Exception:
@@ -357,6 +372,7 @@ class ModrinthMixin:
         def worker():
             try:
                 from hosty.shared.backend import modrinth_client
+
                 path = modrinth_client.get_icon_path(url)
                 if not path:
                     return
@@ -403,7 +419,7 @@ class ModrinthMixin:
 
         icon = Gtk.Image.new_from_icon_name("application-x-addon-symbolic")
         icon.set_pixel_size(44)
-        icon.set_valign(Gtk.Align.START)
+        icon.set_valign(Gtk.Align.CENTER)
         outer.append(icon)
         if hit.icon_url:
             self._load_icon_async(icon, hit.icon_url)
@@ -420,7 +436,6 @@ class ModrinthMixin:
         title.add_css_class("title-4")
         title.set_wrap(False)
         title.set_ellipsize(Pango.EllipsizeMode.END)
-        title.set_hexpand(True)
         title_author.append(title)
 
         author_label = Gtk.Label(label=f"by {hit.author or 'Unknown'}", xalign=0.0)
@@ -428,19 +443,6 @@ class ModrinthMixin:
         author_label.add_css_class("dim-label")
         title_author.append(author_label)
         top_row.append(title_author)
-
-        downloads_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        downloads_icon = Gtk.Image.new_from_icon_name("folder-download-symbolic")
-        downloads_icon.set_pixel_size(12)
-        downloads_box.append(downloads_icon)
-        downloads_label = Gtk.Label(
-            label=_format_compact_count(int(hit.downloads or 0)),
-            xalign=1.0,
-        )
-        downloads_label.add_css_class("caption")
-        downloads_label.add_css_class("dim-label")
-        downloads_box.append(downloads_label)
-        top_row.append(downloads_box)
         content.append(top_row)
 
         desc_text = (hit.description or "No description available.").strip()
@@ -452,20 +454,20 @@ class ModrinthMixin:
         desc.add_css_class("dim-label")
         content.append(desc)
 
-        version_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        version_dd = Gtk.DropDown.new_from_strings(["Checking versions…"])
-        version_dd.set_hexpand(True)
-        version_row.append(version_dd)
+        actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        actions_row.set_margin_top(4)
 
         if is_modpack:
             btn_label = "Install pack"
         elif is_datapack:
             btn_label = "Install datapack"
         else:
-            btn_label = "Install"
+            btn_label = "Install mod"
         install_btn = Gtk.Button(label=btn_label)
         install_btn.add_css_class("suggested-action")
+        install_btn.add_css_class("mod-install-btn")
         install_btn.set_halign(Gtk.Align.START)
+
         if is_modpack and self._is_modpack_installed(hit.project_id):
             install_btn.set_label("Installed")
             install_btn.set_sensitive(False)
@@ -475,17 +477,68 @@ class ModrinthMixin:
         elif (not is_modpack) and (not is_datapack) and self._looks_installed(hit, installed_names):
             install_btn.set_label("Installed")
             install_btn.set_sensitive(False)
-        version_row.append(install_btn)
 
-        open_btn = Gtk.Button(label="Open page")
+        actions_row.append(install_btn)
+
+        # Version selection dropdown (small flat icon dropdown)
+        version_btn = Gtk.MenuButton()
+        version_btn.set_icon_name("pan-down-symbolic")
+        version_btn.add_css_class("flat")
+        version_btn.set_tooltip_text("Loading versions…")
+        version_btn.set_sensitive(False)
+        actions_row.append(version_btn)
+
+        version_popover = Gtk.Popover()
+        version_popover.set_has_arrow(True)
+        version_btn.set_popover(version_popover)
+
+        version_listbox = Gtk.ListBox()
+        version_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        version_listbox.add_css_class("boxed-list")
+        version_listbox.set_margin_start(8)
+        version_listbox.set_margin_end(8)
+        version_listbox.set_margin_top(8)
+        version_listbox.set_margin_bottom(8)
+
+        popover_sw = Gtk.ScrolledWindow()
+        popover_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        popover_sw.set_min_content_width(200)
+        popover_sw.set_min_content_height(180)
+        popover_sw.set_max_content_height(240)
+        popover_sw.set_child(version_listbox)
+        version_popover.set_child(popover_sw)
+
+        open_btn = Gtk.Button(icon_name="web-browser-symbolic")
         open_btn.add_css_class("flat")
-        version_row.append(open_btn)
-        content.append(version_row)
+        open_btn.set_tooltip_text("Open page in browser")
+        actions_row.append(open_btn)
 
+        # Spacer to push downloads stats to the right
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        actions_row.append(spacer)
+
+        downloads_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        downloads_box.set_valign(Gtk.Align.CENTER)
+        downloads_icon = Gtk.Image.new_from_icon_name("folder-download-symbolic")
+        downloads_icon.set_pixel_size(12)
+        downloads_icon.add_css_class("dim-label")
+        downloads_box.append(downloads_icon)
+        downloads_label = Gtk.Label(
+            label=_format_compact_count(int(hit.downloads or 0)),
+            xalign=1.0,
+        )
+        downloads_label.add_css_class("caption")
+        downloads_label.add_css_class("dim-label")
+        downloads_box.append(downloads_label)
+        actions_row.append(downloads_box)
+
+        content.append(actions_row)
         outer.append(content)
         row.set_child(outer)
 
         version_objs = []
+        selected_index = [0]
 
         def on_open_page(*_):
             slug = hit.slug or hit.project_id
@@ -501,10 +554,58 @@ class ModrinthMixin:
         def selected_version():
             if not version_objs:
                 return None
-            idx = int(version_dd.get_selected())
+            idx = selected_index[0]
             if idx < 0 or idx >= len(version_objs):
                 return None
             return version_objs[idx]
+
+        def _update_version_checkmarks():
+            idx = selected_index[0]
+            i = 0
+            while True:
+                row = version_listbox.get_row_at_index(i)
+                if row is None:
+                    break
+                row_box = row.get_child()
+                if isinstance(row_box, Gtk.Box):
+                    last = row_box.get_last_child()
+                    if isinstance(last, Gtk.Image):
+                        row_box.remove(last)
+                    if i == idx:
+                        chk = Gtk.Image.new_from_icon_name("object-select-symbolic")
+                        chk.add_css_class("accent-color")
+                        row_box.append(chk)
+                i += 1
+
+        def _apply_version_selection(idx: int):
+            """Update UI state after user picks a version."""
+            if idx < 0 or idx >= len(version_objs):
+                return
+            selected_index[0] = idx
+            chosen = version_objs[idx]
+            _update_version_checkmarks()
+            version_popover.popdown()
+
+            is_installed = False
+            if is_modpack and self._is_modpack_installed(hit.project_id):
+                is_installed = True
+            elif is_datapack and self._is_datapack_installed(hit.project_id):
+                is_installed = True
+            elif (not is_modpack) and (not is_datapack) and chosen.filename.lower() in installed_names:
+                is_installed = True
+
+            if is_installed:
+                dependents = self._dependency_dependents(chosen.filename) if not (is_modpack or is_datapack) else []
+                install_btn.set_label("Dependency" if dependents else "Installed")
+                install_btn.set_sensitive(False)
+            else:
+                install_btn.set_label(btn_label)
+                install_btn.set_sensitive(True)
+
+        def on_version_row_activated(listbox, listbox_row):
+            _apply_version_selection(listbox_row.get_index())
+
+        version_listbox.connect("row-activated", on_version_row_activated)
 
         def on_install(*_b):
             if self._is_running():
@@ -528,6 +629,7 @@ class ModrinthMixin:
             install_btn.set_sensitive(False)
 
             if is_datapack:
+
                 def ui_ok_dp(fname: str, dep_count: int):
                     install_btn.set_label("Installed")
                     install_btn.set_sensitive(False)
@@ -564,7 +666,6 @@ class ModrinthMixin:
                         for dep in deps_to_install:
                             dep_dest = dp_dir / dep.filename
                             modrinth_client.download_to(dep.download_url, dep_dest)
-                            # Record dependency as an individual datapack install so it shows in UI and gets updates
                             self._record_datapack_install(
                                 dep.project_id,
                                 dep.name or dep.filename,
@@ -598,9 +699,7 @@ class ModrinthMixin:
                     dialog = Adw.AlertDialog()
                     dialog.set_heading("Install required dependencies?")
                     dialog.set_body(
-                        "This datapack requires additional dependencies:\n\n"
-                        f"{preview}{more}\n\n"
-                        "Install them as well?"
+                        f"This datapack requires additional dependencies:\n\n{preview}{more}\n\nInstall them as well?"
                     )
                     dialog.add_response("cancel", "Cancel")
                     dialog.add_response("install", "Install")
@@ -625,16 +724,14 @@ class ModrinthMixin:
 
                 def resolve_and_prompt_dp():
                     try:
-                        # For datapacks, we use the "datapack" loader for dependency resolution
                         deps = modrinth_client.resolve_required_dependencies(
                             chosen.version_id,
                             mc_version,
                             loader="datapack",
                         )
-                        # Filter out already installed datapacks
                         dp_state = self._read_datapack_state().get("datapacks", {})
                         installed_ids = set(dp_state.keys())
-                        
+
                         deps_to_install = []
                         for dep in deps:
                             if dep.project_id in installed_ids:
@@ -669,9 +766,7 @@ class ModrinthMixin:
                             }
                         ),
                     )
-                    self._toast(
-                        f"Installed modpack ({downloaded_count} files)"
-                    )
+                    self._toast(f"Installed modpack ({downloaded_count} files)")
                     self._end_mod_operation(op_token)
                     self._rebuild_lists()
 
@@ -707,9 +802,12 @@ class ModrinthMixin:
                             root,
                             progress_callback=on_pack_progress,
                         )
-                        GLib.idle_add(
-                            lambda d=result.downloaded_files, o=result.extracted_override_files, m=result.managed_mod_files: ui_ok_pack(d, o, m)
+                        d, o, m = (
+                            result.downloaded_files,
+                            result.extracted_override_files,
+                            result.managed_mod_files,
                         )
+                        GLib.idle_add(lambda: ui_ok_pack(d, o, m))
                     except Exception as e:
                         GLib.idle_add(lambda m=str(e): ui_err_pack(m))
 
@@ -788,9 +886,7 @@ class ModrinthMixin:
                 dialog = Adw.AlertDialog()
                 dialog.set_heading("Install required dependencies?")
                 dialog.set_body(
-                    "This mod requires additional dependencies:\n\n"
-                    f"{preview}{more}\n\n"
-                    "Install them as well?"
+                    f"This mod requires additional dependencies:\n\n{preview}{more}\n\nInstall them as well?"
                 )
                 dialog.add_response("cancel", "Cancel")
                 dialog.add_response("install", "Install")
@@ -844,7 +940,12 @@ class ModrinthMixin:
 
         def load_versions():
             if not mc_version and not is_datapack:
-                GLib.idle_add(lambda: version_dd.set_model(Gtk.StringList.new(["No server version"])))
+
+                def ui_no_version():
+                    version_btn.set_sensitive(False)
+                    version_btn.set_tooltip_text("No server version")
+
+                GLib.idle_add(ui_no_version)
                 return
             try:
                 loader_for_query = "datapack" if is_datapack else "fabric"
@@ -855,9 +956,12 @@ class ModrinthMixin:
                     limit=5,
                 )
                 if not versions:
-                    GLib.idle_add(
-                        lambda: version_dd.set_model(Gtk.StringList.new(["No compatible versions"]))
-                    )
+
+                    def ui_no_versions():
+                        version_btn.set_sensitive(False)
+                        version_btn.set_tooltip_text("No compatible versions")
+
+                    GLib.idle_add(ui_no_versions)
                     return
 
                 names = []
@@ -872,33 +976,79 @@ class ModrinthMixin:
                     chosen_for_labels.append(v)
 
                 if not names:
-                    GLib.idle_add(
-                        lambda: version_dd.set_model(Gtk.StringList.new(["No compatible versions"]))
-                    )
+
+                    def ui_no_names():
+                        version_btn.set_sensitive(False)
+                        version_btn.set_tooltip_text("No compatible versions")
+
+                    GLib.idle_add(ui_no_names)
                     return
 
                 version_objs.clear()
                 version_objs.extend(chosen_for_labels)
 
                 def ui_set_versions():
-                    version_dd.set_model(Gtk.StringList.new(names))
-                    version_dd.set_selected(0)
+                    while True:
+                        item = version_listbox.get_row_at_index(0)
+                        if item is None:
+                            break
+                        version_listbox.remove(item)
+
+                    for i, name in enumerate(names):
+                        lbl = Gtk.Label(label=name, xalign=0.0)
+                        lbl.set_hexpand(True)
+
+                        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                        row_box.set_margin_start(12)
+                        row_box.set_margin_end(12)
+                        row_box.set_margin_top(8)
+                        row_box.set_margin_bottom(8)
+                        row_box.append(lbl)
+
+                        if i == 0:
+                            chk = Gtk.Image.new_from_icon_name("object-select-symbolic")
+                            chk.add_css_class("accent-color")
+                            row_box.append(chk)
+
+                        item = Gtk.ListBoxRow()
+                        item.set_activatable(True)
+                        item.set_child(row_box)
+                        version_listbox.append(item)
+
+                    selected_index[0] = 0
+                    version_btn.set_sensitive(True)
+                    first = version_objs[0]
+                    first_vnum = first.version_number or first.name or "?"
+                    version_btn.set_tooltip_text(f"Selected Version: {first_vnum}")
+                    _update_version_checkmarks()
+
+                    is_installed = False
+                    if is_modpack and self._is_modpack_installed(hit.project_id):
+                        is_installed = True
+                    elif is_datapack and self._is_datapack_installed(hit.project_id):
+                        is_installed = True
+                    elif (not is_modpack) and (not is_datapack) and first.filename.lower() in installed_names:
+                        is_installed = True
+
+                    if is_installed:
+                        dependents = (
+                            self._dependency_dependents(first.filename) if not (is_modpack or is_datapack) else []
+                        )
+                        install_btn.set_label("Dependency" if dependents else "Installed")
+                        install_btn.set_sensitive(False)
+                    else:
+                        install_btn.set_label(btn_label)
+                        install_btn.set_sensitive(True)
 
                 GLib.idle_add(ui_set_versions)
 
-                first = version_objs[0]
-                if (not is_modpack) and (not is_datapack) and first.filename.lower() in installed_names:
-                    dependents = self._dependency_dependents(first.filename)
-                    if dependents:
-                        GLib.idle_add(lambda: install_btn.set_label("Dependency"))
-                    else:
-                        GLib.idle_add(lambda: install_btn.set_label("Installed"))
-                    GLib.idle_add(lambda: install_btn.set_sensitive(False))
-            except Exception as e:
-                GLib.idle_add(
-                    lambda m=str(e): version_dd.set_model(Gtk.StringList.new(["Version lookup failed"]))
-                )
-                GLib.idle_add(lambda m=str(e): version_dd.set_tooltip_text(m))
+            except Exception:
+
+                def ui_failed():
+                    version_btn.set_sensitive(False)
+                    version_btn.set_tooltip_text(f"Version lookup failed: {e}")
+
+                GLib.idle_add(ui_failed)
 
         open_btn.connect("clicked", on_open_page)
         install_btn.connect("clicked", on_install)

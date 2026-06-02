@@ -1,27 +1,28 @@
 """
 CreateServerDialog - Multi-step dialog for creating a new Fabric server.
 """
-from pathlib import Path
+
 import threading
+from pathlib import Path
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, GObject, Gio
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
 from hosty.shared.backend.server_manager import ServerManager
-from hosty.shared.utils.image_utils import convert_to_png
 from hosty.shared.utils.constants import (
-    MIN_RAM_MB,
-    MAX_RAM_MB,
-    get_required_java_version,
     DEFAULT_SERVER_PROPERTIES,
     DIFFICULTIES,
     GAMEMODES,
-    LEVEL_TYPES,
     LEVEL_TYPE_NAMES,
+    LEVEL_TYPES,
+    MAX_RAM_MB,
+    MIN_RAM_MB,
+    get_required_java_version,
 )
-
+from hosty.shared.utils.image_utils import convert_to_png
 
 OPTIMISATION_MODS = [
     ("lithium", "Lithium"),
@@ -40,11 +41,11 @@ DIFFICULTY_MODES = [*DIFFICULTIES, "hardcore"]
 
 class CreateServerDialog(Adw.Dialog):
     """Dialog for creating a new Fabric Minecraft server."""
-    
+
     __gsignals__ = {
-        'server-created': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "server-created": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
-    
+
     def __init__(self, server_manager: ServerManager):
         super().__init__()
         self._server_manager = server_manager
@@ -52,34 +53,34 @@ class CreateServerDialog(Adw.Dialog):
         self._loader_versions: list[str] = []
         self._icon_source_path: str = ""
         self._world_import_source_path: str = ""
-        
+
         self.set_title("Create Server")
         self.set_content_width(500)
         self.set_content_height(600)
-        
+
         # Main content
         self._toolbar_view = Adw.ToolbarView()
-        
+
         header = Adw.HeaderBar()
         header.set_show_start_title_buttons(False)
         header.set_show_end_title_buttons(False)
-        
+
         self._cancel_btn = Gtk.Button(label="Cancel")
         self._cancel_btn.connect("clicked", self._on_cancel_clicked)
         header.pack_start(self._cancel_btn)
-        
+
         self._create_btn = Gtk.Button(label="Next")
         self._create_btn.add_css_class("suggested-action")
         self._create_btn.set_sensitive(False)
         self._create_btn.connect("clicked", self._on_primary_clicked)
         header.pack_end(self._create_btn)
-        
+
         self._toolbar_view.add_top_bar(header)
-        
+
         # Stack for config vs progress
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
-        
+
         # ===== First Step =====
         details_page = self._build_details_page()
         self._stack.add_named(details_page, "details")
@@ -93,13 +94,13 @@ class CreateServerDialog(Adw.Dialog):
         self._stack.add_named(progress_page, "progress")
 
         self._stack.connect("notify::visible-child-name", self._on_page_changed)
-        
+
         self._toolbar_view.set_content(self._stack)
         self.set_child(self._toolbar_view)
-        
+
         # Fetch versions
         self._fetch_versions()
-    
+
     def _build_details_page(self) -> Gtk.Widget:
         """Build step 1: basic server details."""
         scrolled = Gtk.ScrolledWindow()
@@ -274,40 +275,41 @@ class CreateServerDialog(Adw.Dialog):
         box.set_halign(Gtk.Align.CENTER)
         box.set_margin_start(40)
         box.set_margin_end(40)
-        
+
         self._progress_status = Adw.StatusPage()
         self._progress_status.set_icon_name("folder-download-symbolic")
         self._progress_status.set_title("Creating Server")
         self._progress_status.set_description("Preparing...")
-        
+
         # Progress bar
         self._progress_bar = Gtk.ProgressBar()
         self._progress_bar.set_show_text(True)
         self._progress_bar.set_margin_start(40)
         self._progress_bar.set_margin_end(40)
         self._progress_bar.add_css_class("hosty-progress")
-        
+
         progress_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         progress_box.append(self._progress_bar)
-        
+
         self._progress_label = Gtk.Label(label="")
         self._progress_label.add_css_class("dim-label")
         progress_box.append(self._progress_label)
-        
+
         self._progress_status.set_child(progress_box)
-        
+
         box.append(self._progress_status)
         return box
-    
+
     def _fetch_versions(self):
         """Fetch available versions from Fabric Meta API."""
+
         def on_versions(game_vers, loader_vers):
             self._game_versions = game_vers
             self._loader_versions = loader_vers
             GLib.idle_add(self._populate_versions)
-        
+
         self._server_manager.download_manager.fetch_all_versions_async(on_versions)
-    
+
     def _populate_versions(self):
         """Populate version dropdowns (called on main thread)."""
         if self._game_versions:
@@ -322,7 +324,7 @@ class CreateServerDialog(Adw.Dialog):
             self._fabric_version_row.set_subtitle(self._loader_versions[0])
 
         self._validate()
-    
+
     def _on_mc_version_changed(self, row, _pspec):
         """Handle MC version selection change."""
         idx = row.get_selected()
@@ -330,20 +332,16 @@ class CreateServerDialog(Adw.Dialog):
             mc_ver = self._game_versions[idx]
             java_ver = get_required_java_version(mc_ver)
             java_mgr = self._server_manager.java_manager
-            
+
             available = java_mgr.is_java_available(java_ver)
             system_ver = java_mgr.system_java_version
-            
+
             if available:
                 self._java_info_row.set_subtitle(f"Java {java_ver} ✓ Available")
             elif system_ver and system_ver >= java_ver:
-                self._java_info_row.set_subtitle(
-                    f"Java {java_ver} needed — system Java {system_ver} can be used"
-                )
+                self._java_info_row.set_subtitle(f"Java {java_ver} needed — system Java {system_ver} can be used")
             else:
-                self._java_info_row.set_subtitle(
-                    f"Java {java_ver} needed — will be downloaded automatically"
-                )
+                self._java_info_row.set_subtitle(f"Java {java_ver} needed — will be downloaded automatically")
 
         self._validate()
 
@@ -400,12 +398,13 @@ class CreateServerDialog(Adw.Dialog):
             path = selected.get_path() or ""
             if not path:
                 return
-            
+
             from hosty.shared.utils.nbt_utils import get_world_info
+
             seed, wtype = get_world_info(Path(path))
-            
+
             self._world_import_source_path = path
-            
+
             msg_parts = [f"{Path(path).name}"]
             if seed:
                 self._seed_entry.set_text(seed)
@@ -413,7 +412,7 @@ class CreateServerDialog(Adw.Dialog):
             if wtype and wtype in self._level_type_values:
                 self._level_type_row.set_selected(self._level_type_values.index(wtype))
                 msg_parts.append("Type imported")
-                
+
             if len(msg_parts) == 1:
                 self._world_import_row.set_subtitle(
                     f"{Path(path).name} — world type must match the selected World type"
@@ -425,7 +424,7 @@ class CreateServerDialog(Adw.Dialog):
 
     def _on_page_changed(self, *_args):
         self._validate()
-    
+
     def _validate(self, *args):
         """Validate current step and update primary action state."""
         name = self._name_entry.get_text().strip()
@@ -563,9 +562,7 @@ class CreateServerDialog(Adw.Dialog):
 
             # Step 2: Download Fabric installer
             installer_path = dl_mgr.download_installer(
-                progress_callback=lambda frac, msg: self._update_progress(
-                    0.28 + frac * 0.14, msg, ""
-                ),
+                progress_callback=lambda frac, msg: self._update_progress(0.28 + frac * 0.14, msg, ""),
             )
 
             if not installer_path:
@@ -586,9 +583,7 @@ class CreateServerDialog(Adw.Dialog):
             success, msg = dl_mgr.download_server_jar(
                 mc_version=mc_version,
                 server_dir=str(server_info.server_dir),
-                progress_callback=lambda frac, msg: self._update_progress(
-                    0.48 + frac * 0.12, msg, f"MC {mc_version}"
-                ),
+                progress_callback=lambda frac, msg: self._update_progress(0.48 + frac * 0.12, msg, f"MC {mc_version}"),
             )
 
             if not success:
@@ -608,9 +603,7 @@ class CreateServerDialog(Adw.Dialog):
                 mc_version=mc_version,
                 server_dir=str(server_info.server_dir),
                 loader_version=loader_version if loader_version else None,
-                progress_callback=lambda frac, msg: self._update_progress(
-                    0.62 + frac * 0.24, msg, ""
-                ),
+                progress_callback=lambda frac, msg: self._update_progress(0.62 + frac * 0.24, msg, ""),
             )
 
             if not success:
@@ -620,6 +613,7 @@ class CreateServerDialog(Adw.Dialog):
             # Step 5: Apply server settings
             self._update_progress(0.88, "Applying server settings...", "")
             from hosty.shared.backend.config_manager import ConfigManager
+
             config = ConfigManager(str(server_info.server_dir))
             config.load()
             config.set_value("motd", DEFAULT_SERVER_PROPERTIES.get("motd", "a hosty server"))
@@ -702,41 +696,46 @@ class CreateServerDialog(Adw.Dialog):
             if has_mc and has_loader:
                 return version
         return None
-    
+
     def _update_progress(self, fraction, title, detail):
         """Update progress on the main thread."""
+
         def _update():
             self._progress_bar.set_fraction(min(1.0, fraction))
             self._progress_status.set_description(title)
             self._progress_label.set_label(detail)
+
         GLib.idle_add(_update)
-    
+
     def _show_error(self, message):
         """Show error state on the main thread."""
+
         def _update():
             self._progress_status.set_icon_name("dialog-error-symbolic")
             self._progress_status.set_title("Creation Failed")
             self._progress_status.set_description(message)
             self._progress_bar.set_fraction(0)
             self._progress_label.set_label("Please try again")
+
         GLib.idle_add(_update)
-    
+
     def _show_success(self, server_id):
         """Show success state and close dialog."""
+
         def _update():
             self._progress_status.set_icon_name("object-select-symbolic")
             self._progress_status.set_title("Server Created!")
             self._progress_status.set_description("Your Fabric server is ready to start")
             self._progress_bar.set_fraction(1.0)
             self._progress_label.set_label("")
-            
+
             # Auto-close after 1.5 seconds
             GLib.timeout_add(1500, lambda: self._finish(server_id))
-        
+
         GLib.idle_add(_update)
-    
+
     def _finish(self, server_id):
         """Close dialog and emit signal."""
-        self.emit('server-created', server_id)
+        self.emit("server-created", server_id)
         self.close()
         return False

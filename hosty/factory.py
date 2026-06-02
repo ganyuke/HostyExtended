@@ -8,8 +8,7 @@ from typing import Protocol
 class HostyApp(Protocol):
     """Common interface for app frontends."""
 
-    def run(self, argv: list[str]) -> int:
-        ...
+    def run(self, argv: list[str]) -> int: ...
 
 
 def create_application() -> HostyApp:

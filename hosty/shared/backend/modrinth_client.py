@@ -1,6 +1,7 @@
 """
 Modrinth API v2 — search and download Fabric mods and modpacks (stdlib only).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -10,9 +11,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 USER_AGENT = "Hosty/1.0 (+https://github.com/hosty)"
 API = "https://api.modrinth.com/v2"
@@ -24,7 +26,7 @@ class ModrinthHit:
     slug: str
     title: str
     description: str
-    icon_url: Optional[str]
+    icon_url: str | None
     latest_version: str
     downloads: int
     author: str
@@ -53,7 +55,7 @@ class ModpackInstallResult:
     managed_mod_files: list[str]
 
 
-def _version_to_model(ver: dict[str, Any]) -> Optional[ModrinthVersion]:
+def _version_to_model(ver: dict[str, Any]) -> ModrinthVersion | None:
     files = ver.get("files") or []
     chosen = _pick_primary_file(files)
     if not chosen:
@@ -81,7 +83,7 @@ def _request_json(url: str, timeout: float = 30.0) -> Any:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _pick_primary_file(files: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def _pick_primary_file(files: list[dict[str, Any]]) -> dict[str, Any] | None:
     primary = next((f for f in files if f.get("primary")), None)
     if primary:
         return primary
@@ -89,7 +91,7 @@ def _pick_primary_file(files: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     return jar if jar else (files[0] if files else None)
 
 
-def _pick_mrpack_file(files: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def _pick_mrpack_file(files: list[dict[str, Any]]) -> dict[str, Any] | None:
     primary_pack = next(
         (f for f in files if f.get("primary") and str(f.get("filename", "")).endswith(".mrpack")),
         None,
@@ -106,7 +108,7 @@ def _download_bytes(url: str, timeout: float = 120.0) -> bytes:
         return resp.read()
 
 
-def get_icon_path(url: str, timeout: float = 20.0) -> Optional[str]:
+def get_icon_path(url: str, timeout: float = 20.0) -> str | None:
     """Download an icon from a URL and cache it to disk, returning the local file path."""
     if not url:
         return None
@@ -128,7 +130,7 @@ def get_icon_path(url: str, timeout: float = 20.0) -> Optional[str]:
         return None
 
 
-def _safe_target(root: Path, relative_path: str) -> Optional[Path]:
+def _safe_target(root: Path, relative_path: str) -> Path | None:
     rel = str(relative_path or "").replace("\\", "/").lstrip("/")
     if not rel:
         return None
@@ -160,8 +162,8 @@ def search_mods(
     limit: int = 20,
     offset: int = 0,
     sort: str = "relevance",
-    game_version: Optional[str] = None,
-    category: Optional[str] = None,
+    game_version: str | None = None,
+    category: str | None = None,
     loader: str = "fabric",
     server_side_only: bool = True,
     project_type: str = "mod",
@@ -244,7 +246,7 @@ def search_mods(
     return hits, total_hits
 
 
-def get_project(project_id: str) -> Optional[dict[str, Any]]:
+def get_project(project_id: str) -> dict[str, Any] | None:
     """Fetch a single Modrinth project object by id or slug."""
     url = f"{API}/project/{project_id}"
     try:
@@ -272,7 +274,7 @@ def get_project_versions(project_id: str) -> list[ModrinthVersion]:
     return out
 
 
-def get_version(version_id: str) -> Optional[dict[str, Any]]:
+def get_version(version_id: str) -> dict[str, Any] | None:
     """Fetch a single Modrinth version object by id."""
     url = f"{API}/version/{version_id}"
     try:
@@ -309,7 +311,7 @@ def resolve_required_dependencies(
         if str(dep.get("dependency_type", "")).lower() != "required":
             continue
 
-        version_obj: Optional[ModrinthVersion] = None
+        version_obj: ModrinthVersion | None = None
 
         dep_version_id = str(dep.get("version_id", "")).strip()
         dep_project_id = str(dep.get("project_id", "")).strip()
@@ -358,18 +360,11 @@ def find_compatible_versions(
         return []
 
     loader_l = loader.lower()
-    exact = [
-        v
-        for v in all_versions
-        if game_version in v.game_versions
-        and loader_l in [x.lower() for x in v.loaders]
-    ]
+    exact = [v for v in all_versions if game_version in v.game_versions and loader_l in [x.lower() for x in v.loaders]]
     if exact:
         return exact[:limit]
 
-    loader_only = [
-        v for v in all_versions if loader_l in [x.lower() for x in v.loaders]
-    ]
+    loader_only = [v for v in all_versions if loader_l in [x.lower() for x in v.loaders]]
     if loader_only:
         return loader_only[:limit]
 
@@ -380,15 +375,13 @@ def find_compatible_version(
     project_id: str,
     game_version: str,
     loader: str = "fabric",
-) -> Optional[ModrinthVersion]:
+) -> ModrinthVersion | None:
     """Return best single version for install, or None."""
     versions = find_compatible_versions(project_id, game_version, loader=loader, limit=1)
     return versions[0] if versions else None
 
 
-def find_compatible_version_file(
-    project_id: str, game_version: str, loader: str = "fabric"
-) -> Optional[tuple[str, str]]:
+def find_compatible_version_file(project_id: str, game_version: str, loader: str = "fabric") -> tuple[str, str] | None:
     """
     Returns (download_url, filename) for the best-matching version file, or None.
     """
@@ -408,7 +401,7 @@ def install_modpack(
     version_id: str,
     server_dir: Path,
     timeout: float = 120.0,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> ModpackInstallResult:
     """
     Download and install a Modrinth modpack version into a server directory.
@@ -496,7 +489,7 @@ def install_modpack(
                 name = zinfo.filename
                 if zinfo.is_dir() or not name.startswith(prefix):
                     continue
-                rel = name[len(prefix):]
+                rel = name[len(prefix) :]
                 if not rel:
                     continue
 

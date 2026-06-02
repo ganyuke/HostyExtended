@@ -1,35 +1,24 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
-import ast
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
-import threading
-import urllib.parse
-import urllib.request
 import webbrowser
-import zipfile
-import gzip
-import struct
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
+from gi.repository import Gio, Gtk
 
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
 from hosty.shared.utils.nbt_utils import get_world_seed as _world_seed
 from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
@@ -45,6 +34,7 @@ __all__ = [
     "_is_descendant_of",
     "_world_seed",
 ]
+
 
 def _open_uri(uri: str) -> bool:
     try:
@@ -93,7 +83,7 @@ def _world_dirs(server_root: Path) -> list[Path]:
         if not props.exists():
             return "world"
         try:
-            with open(props, "r", encoding="utf-8") as f:
+            with open(props, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#") or "=" not in line:
@@ -228,4 +218,3 @@ def _is_descendant_of(widget: Gtk.Widget, ancestor: Gtk.Widget) -> bool:
             return True
         current = current.get_parent()
     return False
-
