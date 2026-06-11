@@ -515,6 +515,7 @@ class ModrinthMixin:
         expanded_install.add_css_class("mod-install-btn-expanded")
 
         row_btns = [compact_install, expanded_install]
+
         def _set_row_btn(label=None, sensitive=None):
             for b in row_btns:
                 if label is not None:
@@ -617,6 +618,7 @@ class ModrinthMixin:
             elif w > 0 and w < 550 and cur != "expanded":
                 widget.set_visible_child_name("expanded")
             return True
+
         row_stack.add_tick_callback(_tick_row)
 
         best_version = [None]
@@ -965,9 +967,7 @@ class ModrinthMixin:
 
             dialog = Adw.AlertDialog()
             dialog.set_heading("Install required dependencies?")
-            dialog.set_body(
-                f"This mod requires additional dependencies:\n\n{preview}{more}\n\nInstall them as well?"
-            )
+            dialog.set_body(f"This mod requires additional dependencies:\n\n{preview}{more}\n\nInstall them as well?")
             dialog.add_response("cancel", "Cancel")
             dialog.add_response("install", "Install")
             dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
@@ -1052,6 +1052,7 @@ class ModrinthMixin:
         install_btn_narrow.set_margin_top(8)
 
         _detail_btns = [install_btn_wide, install_btn_narrow]
+
         def _set_dbtn(label=None, sensitive=None):
             for b in _detail_btns:
                 if label is not None:
@@ -1175,6 +1176,7 @@ class ModrinthMixin:
 
         install_btn_narrow.set_visible(True)
         install_btn_wide.set_visible(False)
+
         def toggle_install_btn(widget, frame_clock, _ud=None):
             w = widget.get_width()
             if w >= 600:
@@ -1184,6 +1186,7 @@ class ModrinthMixin:
                 install_btn_wide.set_visible(False)
                 install_btn_narrow.set_visible(True)
             return True
+
         sw.add_tick_callback(toggle_install_btn)
 
         version_objs: list = []
@@ -1300,12 +1303,21 @@ class ModrinthMixin:
                     limit=20,
                 )
 
-                GLib.idle_add(lambda: self._populate_detail_versions(
-                    version_listbox, version_objs, selected_index,
-                    all_versions, _detail_btns, btn_label,
-                    hit, is_modpack, is_datapack, installed_names,
-                    loading_row,
-                ))
+                GLib.idle_add(
+                    lambda: self._populate_detail_versions(
+                        version_listbox,
+                        version_objs,
+                        selected_index,
+                        all_versions,
+                        _detail_btns,
+                        btn_label,
+                        hit,
+                        is_modpack,
+                        is_datapack,
+                        installed_names,
+                        loading_row,
+                    )
+                )
             except Exception:
                 pass
 

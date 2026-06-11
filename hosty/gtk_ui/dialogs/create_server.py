@@ -687,6 +687,7 @@ class CreateServerDialog(Adw.Dialog):
 
     def _record_optimisation_mod_install(self, server_dir: Path, version, title: str) -> None:
         import json
+
         state_path = Path(server_dir) / ".hosty-mod-installs.json"
         try:
             if state_path.exists():
