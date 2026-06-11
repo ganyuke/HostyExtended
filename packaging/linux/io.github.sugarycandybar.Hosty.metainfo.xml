@@ -8,7 +8,7 @@
   <developer id="io.github.sugarycandybar">
     <name>Sugarycandybar</name>
   </developer>
-  <update_contact>139514123+sugarycandybar@users.noreply.github.com</update_contact>
+  <update_contact>candybaralt@gmail.com</update_contact>
   <description>
     <p>
       Hosty simplifies the process of creating and managing Minecraft servers on Linux. 
@@ -63,46 +63,6 @@
     <release version="1.7.0" date="2026-05-11">
       <description>
         <p>Added support for updating server version; improved bedrock support.</p>
-      </description>
-    </release>
-    <release version="1.6.4" date="2026-05-10">
-      <description>
-        <p>Fix datapack update bug</p>
-      </description>
-    </release>
-    <release version="1.6.3" date="2026-05-10">
-      <description>
-        <p>Add datapack support</p>
-      </description>
-    </release>
-    <release version="1.6.2" date="2026-05-09">
-      <description>
-        <p>Added support for importing custom worlds and simple voice chat tunnels</p>
-      </description>
-    </release>
-    <release version="1.6.1" date="2026-05-7">
-      <description>
-        <p>Ui improvements and mod page changes</p>
-      </description>
-    </release>
-    <release version="1.6.0" date="2026-05-6">
-      <description>
-        <p>Added startup and running in background preferences</p>
-      </description>
-    </release>
-    <release version="1.5.2" date="2026-04-20">
-      <description>
-        <p>Updated store page metadata and screenshots</p>
-      </description>
-    </release>
-    <release version="1.5.1" date="2026-04-19">
-      <description>
-        <p>Update flatpak release</p>
-      </description>
-    </release>
-    <release version="1.5.0" date="2026-04-18">
-      <description>
-        <p>Initial release</p>
       </description>
     </release>
   </releases>

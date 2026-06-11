@@ -116,8 +116,112 @@ button.playit-compact-button {
 
 .mod-card-row {
     border-radius: 12px;
-    background: alpha(currentColor, 0.04);
     padding: 0;
+}
+
+.modrinth-search-box {
+    border-radius: 99px;
+    background-color: alpha(currentColor, 0.06);
+    /* Thin transparent border by default */
+    border: 2px solid transparent;
+    padding: 1px 2px 1px 2px;
+    transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.modrinth-search-box:focus-within {
+    border-color: @accent_bg_color;
+    background-color: alpha(currentColor, 0.08);
+}
+
+/* Strip the SearchEntry's own pill/border so it merges into our box */
+.modrinth-search-entry,
+.modrinth-search-entry:focus {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    min-height: 28px;
+}
+
+/* The inner text/icon cells that GTK creates inside SearchEntry */
+.modrinth-search-entry > text,
+.modrinth-search-entry > image,
+.modrinth-search-entry > button {
+    background: transparent;
+}
+
+/* Filter button — match surrounding pill radius */
+.modrinth-filter-btn {
+    border-radius: 99px;
+    margin: 2px;
+}
+
+/* Filter option chips inside the filter popover */
+.modrinth-filter-option {
+    background: alpha(currentColor, 0.07);
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: alpha(currentColor, 0.82);
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.modrinth-filter-option:hover {
+    background: alpha(currentColor, 0.10);
+}
+.modrinth-filter-option:checked {
+    background: alpha(@accent_bg_color, 0.16);
+    color: @accent_bg_color;
+}
+
+.modrinth-filter-label {
+    font-weight: 700;
+    color: @theme_text_color;
+}
+
+/* Install button — enforce a comfortable slightly compact minimum width */
+.mod-install-btn {
+    min-width: 86px;
+}
+
+/* Fixed-size install button for compact list rows */
+.mod-install-btn-fixed {
+    min-width: 115px;
+    min-height: 34px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    font-weight: 700;
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+
+/* Small install button for expanded list rows */
+.mod-install-btn-expanded {
+    min-width: 110px;
+    min-height: 32px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    font-weight: 700;
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+
+/* Large install button for the detail page */
+.mod-install-btn-large {
+    min-width: 120px;
+    min-height: 40px;
+    font-weight: 700;
+}
+
+/* Center the back navigation button vertically in the header */
+.navigation-controls-bar button.back-button {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+headerbar .navigation-controls-bar {
+    margin-top: 0;
+    margin-bottom: 0;
 }
 
 .mod-icon-frame {
@@ -132,6 +236,18 @@ button.playit-compact-button {
     border-radius: 999px;
     padding: 2px 8px;
     background: alpha(currentColor, 0.08);
+}
+
+/* ===== Modrinth Detail Page ===== */
+.mod-detail-icon {
+    border-radius: 16px;
+    min-width: 80px;
+    min-height: 80px;
+}
+
+.mod-detail-section {
+    margin-top: 12px;
+    margin-bottom: 12px;
 }
 
 /* ===== Performance Cards ===== */

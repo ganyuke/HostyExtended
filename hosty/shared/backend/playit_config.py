@@ -1,11 +1,11 @@
 """
 Per-server playit configuration helpers.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
-
 
 DEFAULT_PLAYIT_CONFIG = {
     "secret": "",
@@ -30,7 +30,7 @@ def load_playit_config(server_dir: str | Path) -> dict:
         return dict(DEFAULT_PLAYIT_CONFIG)
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         return dict(DEFAULT_PLAYIT_CONFIG)

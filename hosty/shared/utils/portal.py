@@ -1,5 +1,6 @@
 import sys
 import uuid
+
 from gi.repository import Gio, GLib
 
 PORTAL_BUS_NAME = "org.freedesktop.portal.Desktop"
@@ -17,6 +18,7 @@ def request_background(autostart: bool, callback: callable) -> None:
         try:
             import winreg
             from pathlib import Path
+
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             app_name = "Hosty"
 
@@ -51,12 +53,12 @@ def request_background(autostart: bool, callback: callable) -> None:
         return
 
     handle_token = f"hosty_{uuid.uuid4().hex}"
-    
+
     sender_name = bus.get_unique_name()
     if not sender_name:
         sender_name = ""
     sender_name = sender_name.lstrip(":").replace(".", "_")
-    
+
     expected_handle = f"/org/freedesktop/portal/desktop/request/{sender_name}/{handle_token}"
 
     subscription_id = None
@@ -66,7 +68,7 @@ def request_background(autostart: bool, callback: callable) -> None:
         if subscription_id is not None:
             connection.signal_unsubscribe(subscription_id)
             subscription_id = None
-            
+
         try:
             response = parameters.get_child_value(0).get_uint32()
             results = parameters.get_child_value(1)
@@ -87,21 +89,10 @@ def request_background(autostart: bool, callback: callable) -> None:
                 pass
             return False
 
-        callback(
-            True,
-            result_bool("background"),
-            result_bool("autostart"),
-            ""
-        )
+        callback(True, result_bool("background"), result_bool("autostart"), "")
 
     subscription_id = bus.signal_subscribe(
-        PORTAL_BUS_NAME,
-        REQUEST_INTERFACE,
-        "Response",
-        expected_handle,
-        None,
-        Gio.DBusSignalFlags.NONE,
-        on_response
+        PORTAL_BUS_NAME, REQUEST_INTERFACE, "Response", expected_handle, None, Gio.DBusSignalFlags.NONE, on_response
     )
 
     options = {
@@ -110,7 +101,7 @@ def request_background(autostart: bool, callback: callable) -> None:
         "autostart": GLib.Variant("b", autostart),
         "commandline": GLib.Variant("as", ["hosty", "--background"]),
     }
-    
+
     try:
         bus.call(
             PORTAL_BUS_NAME,
@@ -123,13 +114,14 @@ def request_background(autostart: bool, callback: callable) -> None:
             -1,
             None,
             None,
-            None
+            None,
         )
     except Exception as e:
         if subscription_id is not None:
             bus.signal_unsubscribe(subscription_id)
             subscription_id = None
         callback(False, False, False, f"Failed to request background: {e}")
+
 
 def set_background_status(message: str) -> None:
     """Set the background status message."""
@@ -155,7 +147,7 @@ def set_background_status(message: str) -> None:
             -1,
             None,
             None,
-            None
+            None,
         )
     except Exception:
         pass

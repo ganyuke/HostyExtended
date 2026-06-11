@@ -1,40 +1,25 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
-import ast
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-import zipfile
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from hosty.shared.backend.config_manager import ConfigManager
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
 from hosty.shared.utils.constants import LEVEL_TYPE_NAMES, LEVEL_TYPES
 from hosty.shared.utils.nbt_utils import get_world_info
 
-
-
 from ..utils import *
+
 
 class WorldsMixin:
     def _configured_world_seed(self) -> str:
@@ -63,13 +48,13 @@ class WorldsMixin:
         dims = _world_dimension_dirs(path)
         row_title = "World" if path.name == "world" else path.name
         row = Adw.ActionRow(title=row_title)
-        
+
         seed, wtype = get_world_info(path)
         if not seed:
             seed = self._configured_world_seed()
         if not wtype:
             wtype = self._configured_world_type()
-            
+
         subtitle_parts = []
         if seed:
             subtitle_parts.append(seed)
@@ -79,7 +64,7 @@ class WorldsMixin:
             subtitle_parts.append("0 dimensions")
         else:
             subtitle_parts.append(f"{len(dims)} dimensions")
-            
+
         row.set_subtitle(" · ".join(subtitle_parts))
         row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
         row.set_activatable(True)
@@ -90,10 +75,7 @@ class WorldsMixin:
     def _push_world_page(self, path: Path) -> None:
         show_fullscreen = self._push_fullscreen_page_cb is not None
         page_title = "World" if path.name == "world" else path.name
-        page = Adw.NavigationPage(
-            title=page_title,
-            child=self._build_world_page(path, show_controls=show_fullscreen)
-        )
+        page = Adw.NavigationPage(title=page_title, child=self._build_world_page(path, show_controls=show_fullscreen))
         if show_fullscreen:
             self._push_fullscreen_page_cb(page)
         else:
@@ -111,7 +93,7 @@ class WorldsMixin:
 
         if seed or wtype:
             info_group = Adw.PreferencesGroup(title="World Info")
-            
+
             if seed:
                 seed_row = Adw.ActionRow(title="World Seed", subtitle=seed)
                 copy_btn = self._icon_button(
@@ -121,17 +103,17 @@ class WorldsMixin:
                 )
                 seed_row.add_suffix(copy_btn)
                 info_group.add(seed_row)
-                
+
             if wtype:
                 display_type = LEVEL_TYPE_NAMES.get(wtype, wtype)
                 type_row = Adw.ActionRow(title="World Type", subtitle=display_type)
                 info_group.add(type_row)
-                
+
             page.add(info_group)
 
         # Actions
         actions_group = Adw.PreferencesGroup(title="Actions")
-        
+
         open_row = Adw.ActionRow(title="Open World Folder")
         open_row.add_prefix(Gtk.Image.new_from_icon_name("folder-open-symbolic"))
         open_row.set_activatable(True)
@@ -188,7 +170,7 @@ class WorldsMixin:
         sw = Gtk.ScrolledWindow()
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sw.set_child(page)
-        
+
         # We need a subpage shell for proper rendering. Assuming it exists in mixin or parent view.
         # But wait, `_build_subpage_shell` is in BackupsMixin. Let's see if we can use it.
         # If FilesView inherits both, self._build_subpage_shell is available.
@@ -245,10 +227,10 @@ class WorldsMixin:
         def on_response(_dialog, response):
             if response != "reset":
                 return
-                
+
             selected_type_idx = type_row.get_selected()
             selected_type = LEVEL_TYPES[selected_type_idx] if selected_type_idx < len(LEVEL_TYPES) else ""
-            
+
             ok, msg = self._server_manager.create_world_folder(
                 self._server_info.id,
                 "world",
@@ -288,9 +270,7 @@ class WorldsMixin:
 
         confirm = Adw.AlertDialog()
         confirm.set_heading("Import world folder?")
-        confirm.set_body(
-            "Hosty will replace the existing world with a the imported folder."
-        )
+        confirm.set_body("Hosty will replace the existing world with a the imported folder.")
         confirm.add_response("cancel", "Cancel")
         confirm.add_response("import", "Import")
         confirm.set_default_response("import")
@@ -357,7 +337,7 @@ class WorldsMixin:
             if response == "delete":
                 self._soft_delete_with_undo(
                     dim_path,
-                    f"dimension \"{name}\"",
+                    f'dimension "{name}"',
                     on_refresh=self._rebuild_lists,
                 )
 

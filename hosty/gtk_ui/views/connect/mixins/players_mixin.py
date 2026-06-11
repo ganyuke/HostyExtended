@@ -1,36 +1,28 @@
 """
 ConnectView - Server connection tools (playit.gg tunnel).
 """
+
 from __future__ import annotations
 
 import json
-import socket
-import subprocess
-import sys
 import threading
 import urllib.parse
 import urllib.request
-import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Adw, Gdk, GLib
-
-from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
-from hosty.shared.backend.server_manager import ServerInfo, ServerManager
-from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
-
+from gi.repository import Adw, GLib, Gtk
 
 PLAYIT_DASHBOARD_URL = "https://playit.gg/account/tunnels"
 
 
-
 from ..utils import *
+
 
 class PlayersMixin:
     def _append_players_groups(self, page: Adw.PreferencesPage):
@@ -88,17 +80,17 @@ class PlayersMixin:
         for row in self._banned_list_rows:
             row.set_subtitle(ban_summary)
 
-    def _player_list_paths(self) -> tuple[Optional[Path], Optional[Path]]:
+    def _player_list_paths(self) -> tuple[Path | None, Path | None]:
         root = self._server_dir()
         if not root:
             return None, None
         return root / "whitelist.json", root / "banned-players.json"
 
-    def _read_player_list(self, path: Optional[Path]) -> list[dict]:
+    def _read_player_list(self, path: Path | None) -> list[dict]:
         if not path or not path.exists():
             return []
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
         except Exception:
             return []
@@ -115,7 +107,7 @@ class PlayersMixin:
             out.append(item)
         return sorted(out, key=lambda e: str(e.get("name", "")).lower())
 
-    def _write_player_list(self, path: Optional[Path], entries: list[dict]) -> bool:
+    def _write_player_list(self, path: Path | None, entries: list[dict]) -> bool:
         if not path:
             return False
         try:
@@ -267,14 +259,14 @@ class PlayersMixin:
         dialog.set_close_response("cancel")
 
         group = Adw.PreferencesGroup()
-        
+
         name_entry = Adw.EntryRow(title="Player name")
         group.add(name_entry)
-        
+
         reason_entry = Adw.EntryRow(title="Reason")
         reason_entry.set_text("Banned by Hosty")
         group.add(reason_entry)
-        
+
         dialog.set_extra_child(group)
 
         def on_response(_d, response):
@@ -325,14 +317,16 @@ class PlayersMixin:
                     if saved:
                         self._toast(f"Added {resolved_name} to whitelist")
                 else:
-                    entries.append({
-                        "uuid": resolved_uuid,
-                        "name": resolved_name,
-                        "created": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S +0000"),
-                        "source": "Hosty",
-                        "expires": "forever",
-                        "reason": reason_text,
-                    })
+                    entries.append(
+                        {
+                            "uuid": resolved_uuid,
+                            "name": resolved_name,
+                            "created": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S +0000"),
+                            "source": "Hosty",
+                            "expires": "forever",
+                            "reason": reason_text,
+                        }
+                    )
                     saved = self._write_player_list(path, entries)
                     if saved:
                         self._toast(f"Banned {resolved_name}")
@@ -429,4 +423,3 @@ class PlayersMixin:
                 on_button=undo_remove,
                 timeout=6,
             )
-

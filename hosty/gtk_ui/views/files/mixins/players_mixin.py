@@ -1,46 +1,32 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
 import json
-import ast
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
 import threading
 import urllib.parse
 import urllib.request
-import webbrowser
-import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
-
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
-
-
+from gi.repository import Adw, GLib, Gtk
 
 from ..utils import *
+
 
 class PlayersMixin:
     def _push_players_page(self, *_args) -> None:
         show_fullscreen = self._push_fullscreen_page_cb is not None
-        page = Adw.NavigationPage(
-            title="Players", 
-            child=self._build_players_page(show_controls=show_fullscreen)
-        )
-        
+        page = Adw.NavigationPage(title="Players", child=self._build_players_page(show_controls=show_fullscreen))
+
         if show_fullscreen:
             self._push_fullscreen_page_cb(page)
         else:
@@ -57,9 +43,7 @@ class PlayersMixin:
         self._players_name_row.set_show_apply_button(False)
         actions.add(self._players_name_row)
 
-        add_row = Adw.ActionRow(
-            title="Add to whitelist"
-        )
+        add_row = Adw.ActionRow(title="Add to whitelist")
         add_row.add_prefix(Gtk.Image.new_from_icon_name("list-add-symbolic"))
         add_row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
         add_row.set_activatable(True)
@@ -89,17 +73,17 @@ class PlayersMixin:
         sw.set_child(page)
         return self._build_subpage_shell("Players", sw, show_controls=show_controls)
 
-    def _player_list_paths(self) -> tuple[Optional[Path], Optional[Path]]:
+    def _player_list_paths(self) -> tuple[Path | None, Path | None]:
         root = self._server_dir()
         if not root:
             return None, None
         return root / "whitelist.json", root / "banned-players.json"
 
-    def _read_player_list(self, path: Optional[Path]) -> list[dict]:
+    def _read_player_list(self, path: Path | None) -> list[dict]:
         if not path or not path.exists():
             return []
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = json.load(f)
         except Exception:
             return []
@@ -118,7 +102,7 @@ class PlayersMixin:
 
         return sorted(out, key=lambda e: str(e.get("name", "")).lower())
 
-    def _write_player_list(self, path: Optional[Path], entries: list[dict]) -> bool:
+    def _write_player_list(self, path: Path | None, entries: list[dict]) -> bool:
         if not path:
             return False
         try:
@@ -251,14 +235,16 @@ class PlayersMixin:
                     if saved:
                         self._toast(f"Added {resolved_name} to whitelist")
                 else:
-                    entries.append({
-                        "uuid": resolved_uuid,
-                        "name": resolved_name,
-                        "created": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S +0000"),
-                        "source": "Hosty",
-                        "expires": "forever",
-                        "reason": "Banned by Hosty",
-                    })
+                    entries.append(
+                        {
+                            "uuid": resolved_uuid,
+                            "name": resolved_name,
+                            "created": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S +0000"),
+                            "source": "Hosty",
+                            "expires": "forever",
+                            "reason": "Banned by Hosty",
+                        }
+                    )
                     saved = self._write_player_list(path, entries)
                     if saved:
                         self._toast(f"Banned {resolved_name}")
@@ -307,4 +293,3 @@ class PlayersMixin:
                 process.send_command(f"pardon {name}")
             self._refresh_player_lists()
             self._toast(f"Unbanned {name}")
-

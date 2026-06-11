@@ -1,40 +1,31 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
-import ast
-import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import threading
-import urllib.parse
-import urllib.request
-import webbrowser
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
+from gi.repository import Adw, GLib, Gtk
 
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
-
-
+from hosty.shared.backend.server_manager import ServerManager
 
 from ..utils import *
 
+
 class BackupsMixin:
-    def _backups_dir(self) -> Optional[Path]:
+    def _backups_dir(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
@@ -58,11 +49,8 @@ class BackupsMixin:
 
     def _push_backups_page(self, *_args) -> None:
         show_fullscreen = self._push_fullscreen_page_cb is not None
-        page = Adw.NavigationPage(
-            title="Backups", 
-            child=self._build_backups_page(show_controls=show_fullscreen)
-        )
-        
+        page = Adw.NavigationPage(title="Backups", child=self._build_backups_page(show_controls=show_fullscreen))
+
         if show_fullscreen:
             self._push_fullscreen_page_cb(page)
         else:
@@ -140,7 +128,7 @@ class BackupsMixin:
     def _make_backup_row(self, zp: Path) -> Adw.ActionRow:
         st = zp.stat()
         row = Adw.ActionRow(title=zp.name)
-        
+
         # Check if it's a full backup and has a version in the filename
         version_str = ""
         if zp.name.startswith("hosty-full-backup-"):
@@ -251,7 +239,9 @@ class BackupsMixin:
                     self._full_backup_spinner.stop()
                     self._full_backup_spinner.set_visible(False)
                 if self._full_backup_row:
-                    self._full_backup_row.set_subtitle("Back up the entire server folder, including mods and executables")
+                    self._full_backup_row.set_subtitle(
+                        "Back up the entire server folder, including mods and executables"
+                    )
                 self._refresh_backup_list()
                 if ok:
                     self._toast(f"Saved {msg}")
@@ -270,11 +260,14 @@ class BackupsMixin:
 
         dialog = Adw.AlertDialog()
         dialog.set_heading("Restore backup?")
-        
+
         is_full = zp.name.startswith("hosty-full-backup-")
         body_text = f"Restore “{zp.name}”?\n\n"
         if is_full:
-            body_text += "WARNING: This is a full backup. Restoring it will completely replace ALL server configuration, mods, and world files."
+            body_text += (
+                "WARNING: This is a full backup. Restoring it will"
+                " completely replace ALL server configuration, mods, and world files."
+            )
             backup_version = ServerManager.backup_game_version(zp)
             current_version = self._server_info.mc_version if self._server_info else ""
             if backup_version and current_version and ServerManager.is_version_older(backup_version, current_version):
@@ -284,7 +277,7 @@ class BackupsMixin:
                 )
         else:
             body_text += "This replaces only world folders contained in the backup."
-        
+
         dialog.set_body(body_text)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("restore", "Restore")
@@ -335,7 +328,7 @@ class BackupsMixin:
                                 shutil.rmtree(item, ignore_errors=True)
                             else:
                                 item.unlink(missing_ok=True)
-                        
+
                         for item in tmp_root.iterdir():
                             dst = root / item.name
                             if item.is_dir():
@@ -351,21 +344,25 @@ class BackupsMixin:
                         for item in root.iterdir():
                             if not item.is_dir():
                                 continue
-                            if (item / "level.dat").exists() or item.name.casefold() == level_name.casefold() or any(
-                                (item / marker).exists()
-                                for marker in (
-                                    "region",
-                                    "data",
-                                    "playerdata",
-                                    "poi",
-                                    "entities",
-                                    "stats",
-                                    "advancements",
-                                    "dimensions",
-                                    "DIM-1",
-                                    "DIM1",
-                                    "session.lock",
-                                    "uid.dat",
+                            if (
+                                (item / "level.dat").exists()
+                                or item.name.casefold() == level_name.casefold()
+                                or any(
+                                    (item / marker).exists()
+                                    for marker in (
+                                        "region",
+                                        "data",
+                                        "playerdata",
+                                        "poi",
+                                        "entities",
+                                        "stats",
+                                        "advancements",
+                                        "dimensions",
+                                        "DIM-1",
+                                        "DIM1",
+                                        "session.lock",
+                                        "uid.dat",
+                                    )
                                 )
                             ):
                                 shutil.rmtree(item, ignore_errors=True)
@@ -397,7 +394,7 @@ class BackupsMixin:
     def _confirm_delete_backup(self, zp: Path) -> None:
         self._soft_delete_with_undo(
             zp,
-            f"backup \"{zp.name}\"",
+            f'backup "{zp.name}"',
             on_refresh=self._refresh_backup_list,
         )
 

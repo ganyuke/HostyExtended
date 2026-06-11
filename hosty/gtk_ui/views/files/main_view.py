@@ -1,38 +1,28 @@
 """
 FilesView — folders, worlds, backups, and Modrinth integration (per selected server).
 """
+
 from __future__ import annotations
 
-import json
-import ast
-import os
 import shutil
-import subprocess
-import sys
-import tempfile
 import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-import zipfile
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-import uuid
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk, GdkPixbuf
+from gi.repository import Adw, GLib, Gtk
 
-from hosty.shared.backend.server_manager import ServerManager, ServerInfo
+from hosty.shared.backend.server_manager import ServerInfo, ServerManager
 
-
-
+from .mixins import BackupsMixin, ModrinthMixin, ModsMixin, PlayersMixin, WorldsMixin
 from .utils import *
-from .mixins import ModsMixin, BackupsMixin, PlayersMixin, ModrinthMixin, WorldsMixin
+
 
 class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, WorldsMixin):
     """Browse files for the currently selected server only."""
@@ -40,41 +30,41 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_hexpand(True)
-        self._server_info: Optional[ServerInfo] = None
-        self._server_manager: Optional[ServerManager] = None
-        self._root_page: Optional[Adw.NavigationPage] = None
+        self._server_info: ServerInfo | None = None
+        self._server_manager: ServerManager | None = None
+        self._root_page: Adw.NavigationPage | None = None
         self._push_fullscreen_page_cb = None
         self._modrinth_page = None
         self._modrinth_header = None
 
-        self._worlds_group: Optional[Adw.PreferencesGroup] = None
-        self._mods_group: Optional[Adw.PreferencesGroup] = None
-        self._check_updates_row: Optional[Adw.ActionRow] = None
+        self._worlds_group: Adw.PreferencesGroup | None = None
+        self._mods_group: Adw.PreferencesGroup | None = None
+        self._check_updates_row: Adw.ActionRow | None = None
         self._mods_update_busy = False
         self._modpack_version_enrich_busy = False
         self._active_mod_operation_tokens: dict[str, str] = {}
         self._mod_operation_lock = threading.Lock()
-        self._players_group: Optional[Adw.PreferencesGroup] = None
+        self._players_group: Adw.PreferencesGroup | None = None
         self._world_rows: list[Gtk.Widget] = []
         self._mod_rows: list[Gtk.Widget] = []
         self._datapack_rows: list[Gtk.Widget] = []
         self._disabled_rows: list[Gtk.Widget] = []
-        self._mods_expander: Optional[Adw.ExpanderRow] = None
-        self._datapacks_expander: Optional[Adw.ExpanderRow] = None
-        self._disabled_expander: Optional[Adw.ExpanderRow] = None
+        self._mods_expander: Adw.ExpanderRow | None = None
+        self._datapacks_expander: Adw.ExpanderRow | None = None
+        self._disabled_expander: Adw.ExpanderRow | None = None
         self._worlds_snapshot: tuple[tuple[str, tuple[str, ...]], ...] = tuple()
         self._disabled_snapshot: tuple[tuple[str, str, str], ...] = tuple()
 
-        self._backups_group: Optional[Adw.PreferencesGroup] = None
-        self._backups_row: Optional[Adw.ActionRow] = None
+        self._backups_group: Adw.PreferencesGroup | None = None
+        self._backups_row: Adw.ActionRow | None = None
         self._backup_rows: list[Gtk.Widget] = []
         self._backup_busy = False
-        self._create_backup_row: Optional[Adw.ActionRow] = None
-        self._backup_spinner: Optional[Gtk.Spinner] = None
+        self._create_backup_row: Adw.ActionRow | None = None
+        self._backup_spinner: Gtk.Spinner | None = None
 
-        self._players_name_row: Optional[Adw.EntryRow] = None
-        self._whitelist_group: Optional[Adw.PreferencesGroup] = None
-        self._banned_group: Optional[Adw.PreferencesGroup] = None
+        self._players_name_row: Adw.EntryRow | None = None
+        self._whitelist_group: Adw.PreferencesGroup | None = None
+        self._banned_group: Adw.PreferencesGroup | None = None
         self._whitelist_rows: list[Gtk.Widget] = []
         self._banned_rows: list[Gtk.Widget] = []
 
@@ -194,8 +184,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                     break
                 self._nav.pop()
 
-
-    def _server_dir(self) -> Optional[Path]:
+    def _server_dir(self) -> Path | None:
         if not self._server_info:
             return None
         return Path(self._server_info.server_dir)
@@ -326,10 +315,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                 self._datapack_rows.append(row)
 
             # Also scan datapacks dir for untracked zip files
-            tracked_filenames = {
-                str(m.get("filename", "")).strip().lower()
-                for m in dp_state.values()
-            }
+            tracked_filenames = {str(m.get("filename", "")).strip().lower() for m in dp_state.values()}
             if dp_dir and dp_dir.is_dir():
                 for dp_file in sorted(dp_dir.glob("*.zip"), key=lambda p: p.name.lower()):
                     if dp_file.name.lower() in tracked_filenames:
@@ -341,7 +327,8 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                         "user-trash-symbolic",
                         "Delete datapack file",
                         lambda *_p, p=dp_file: self._soft_delete_with_undo(
-                            p, f"datapack \"{p.name}\"",
+                            p,
+                            f'datapack "{p.name}"',
                             on_refresh=self._rebuild_lists,
                         ),
                         destructive=True,
@@ -459,11 +446,13 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         items: list[tuple[str, str, str]] = []
         for key in ("modpacks", "mods", "datapacks"):
             for item in data.get(key, []):
-                items.append((
-                    key,
-                    str(item.get("project_id") or ""),
-                    str(item.get("filename") or ""),
-                ))
+                items.append(
+                    (
+                        key,
+                        str(item.get("project_id") or ""),
+                        str(item.get("filename") or ""),
+                    )
+                )
         return tuple(sorted(items))
 
     def _delete_disabled_component(self, kind: str, project_id: str, filename: str) -> None:
@@ -524,7 +513,7 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
         if not _open_path(path):
             self._alert("Could not open path", str(path))
 
-    def _trash_dir(self) -> Optional[Path]:
+    def _trash_dir(self) -> Path | None:
         root = self._server_dir()
         if not root:
             return None
@@ -565,7 +554,9 @@ class FilesView(Gtk.Box, BackupsMixin, ModsMixin, PlayersMixin, ModrinthMixin, W
                 restore_target.parent.mkdir(parents=True, exist_ok=True)
                 if restore_target.exists():
                     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    restore_target = restore_target.with_name(f"{restore_target.stem}-restored-{stamp}{restore_target.suffix}")
+                    restore_target = restore_target.with_name(
+                        f"{restore_target.stem}-restored-{stamp}{restore_target.suffix}"
+                    )
                 shutil.move(str(trashed), str(restore_target))
                 on_refresh()
                 self._toast(f"Restored {label}")

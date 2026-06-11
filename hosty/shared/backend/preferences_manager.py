@@ -1,13 +1,13 @@
 """
 PreferencesManager - Persist and retrieve Hosty app-level preferences.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from hosty.shared.utils.constants import DATA_DIR, DEFAULT_RAM_MB, MIN_RAM_MB, MAX_RAM_MB
-
+from hosty.shared.utils.constants import DATA_DIR, DEFAULT_RAM_MB, MAX_RAM_MB, MIN_RAM_MB
 
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
@@ -34,7 +34,7 @@ class PreferencesManager:
         if not self._settings_path.exists():
             return
         try:
-            with open(self._settings_path, "r", encoding="utf-8") as f:
+            with open(self._settings_path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 self._settings.update(data)

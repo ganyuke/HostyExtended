@@ -2,32 +2,34 @@
 WelcomeView - Empty state shown when no server is selected.
 Includes its own Adw.HeaderBar with proper window controls.
 """
+
 from pathlib import Path
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-gi.require_version('GdkPixbuf', '2.0')
-from gi.repository import Gtk, Adw, Gdk, GdkPixbuf
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Adw, Gdk, GdkPixbuf, Gtk
 
 from hosty.shared.utils.constants import APP_ID
 
 
 class WelcomeView(Gtk.Box):
     """Welcome/empty state view shown when no server is selected.
-    
+
     Uses Adw.ToolbarView internally so it has a proper HeaderBar with window
     controls visible.
     """
-    
+
     def __init__(self):
         super().__init__()
-        
+
         self._toolbar_view = Adw.ToolbarView()
         self._toolbar_view.set_hexpand(True)
         self._toolbar_view.set_vexpand(True)
         self.append(self._toolbar_view)
-        
+
         # Header bar with window controls
         self._header = Adw.HeaderBar()
         self._header.set_title_widget(Gtk.Label(label="Hosty"))
@@ -61,10 +63,7 @@ class WelcomeView(Gtk.Box):
         content.append(title)
 
         description = Gtk.Label(
-            label=(
-                "Create and manage your Fabric Minecraft servers\n"
-                "with an easy-to-use interface."
-            )
+            label=("Create and manage your Fabric Minecraft servers\nwith an easy-to-use interface.")
         )
         description.set_justify(Gtk.Justification.CENTER)
         description.set_wrap(True)

@@ -1,37 +1,29 @@
 """
 ConnectView - Server connection tools (playit.gg tunnel).
 """
+
 from __future__ import annotations
 
 import json
-import socket
-import subprocess
-import sys
 import threading
-import urllib.parse
-import urllib.request
-import webbrowser
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Adw, Gdk, GLib
+from gi.repository import Adw, Gdk, GLib
 
-from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
-from hosty.shared.backend.server_manager import ServerInfo, ServerManager
-from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
 from hosty.gtk_ui.dialogs.manage_playit_tunnel import ManagePlayitTunnelDialog
-
+from hosty.gtk_ui.dialogs.playit_setup import PlayitSetupDialog
+from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
 
 PLAYIT_DASHBOARD_URL = "https://playit.gg/account/tunnels"
 
 
-
 from ..utils import *
+
 
 class PlayitMixin:
     def _load_server_config(self):
@@ -63,7 +55,7 @@ class PlayitMixin:
         self._auto_start_row.set_active(bool(self._cfg.get("auto_start", True)))
         self._suppress_config_updates = False
 
-    def _save_server_config(self, updates: Optional[dict] = None) -> bool:
+    def _save_server_config(self, updates: dict | None = None) -> bool:
         root = self._server_dir()
         if not root:
             return False
@@ -89,7 +81,7 @@ class PlayitMixin:
         """Clear a tunnel endpoint configuration for all servers."""
         if not self._server_manager:
             return
-        
+
         for server in self._server_manager.servers:
             try:
                 server_root = str(server.server_dir)
@@ -103,9 +95,15 @@ class PlayitMixin:
                         "setup_complete": bool(cfg.get("setup_complete", False)),
                         "auto_start": bool(cfg.get("auto_start", True)),
                         "auto_install": bool(cfg.get("auto_install", True)),
-                        "java_endpoint": "" if endpoint_key == "java_endpoint" else str(cfg.get("java_endpoint", "")).strip(),
-                        "bedrock_endpoint": "" if endpoint_key == "bedrock_endpoint" else str(cfg.get("bedrock_endpoint", "")).strip(),
-                        "voicechat_endpoint": "" if endpoint_key == "voicechat_endpoint" else str(cfg.get("voicechat_endpoint", "")).strip(),
+                        "java_endpoint": ""
+                        if endpoint_key == "java_endpoint"
+                        else str(cfg.get("java_endpoint", "")).strip(),
+                        "bedrock_endpoint": ""
+                        if endpoint_key == "bedrock_endpoint"
+                        else str(cfg.get("bedrock_endpoint", "")).strip(),
+                        "voicechat_endpoint": ""
+                        if endpoint_key == "voicechat_endpoint"
+                        else str(cfg.get("voicechat_endpoint", "")).strip(),
                     },
                 )
             except Exception:
@@ -115,17 +113,27 @@ class PlayitMixin:
         """Update a tunnel endpoint for all servers that already have it."""
         if not self._server_manager or not new_endpoint:
             return
-        
+
         for server in self._server_manager.servers:
             try:
                 server_root = str(server.server_dir)
                 cfg = load_playit_config(server_root)
                 # Only update if this server already has this tunnel type
                 if str(cfg.get(endpoint_key, "")).strip():
-                    java_endpoint = new_endpoint if endpoint_key == "java_endpoint" else str(cfg.get("java_endpoint", "")).strip()
-                    bedrock_endpoint = new_endpoint if endpoint_key == "bedrock_endpoint" else str(cfg.get("bedrock_endpoint", "")).strip()
-                    voicechat_endpoint = new_endpoint if endpoint_key == "voicechat_endpoint" else str(cfg.get("voicechat_endpoint", "")).strip()
-                    
+                    java_endpoint = (
+                        new_endpoint if endpoint_key == "java_endpoint" else str(cfg.get("java_endpoint", "")).strip()
+                    )
+                    bedrock_endpoint = (
+                        new_endpoint
+                        if endpoint_key == "bedrock_endpoint"
+                        else str(cfg.get("bedrock_endpoint", "")).strip()
+                    )
+                    voicechat_endpoint = (
+                        new_endpoint
+                        if endpoint_key == "voicechat_endpoint"
+                        else str(cfg.get("voicechat_endpoint", "")).strip()
+                    )
+
                     save_playit_config(
                         server_root,
                         {
@@ -217,10 +225,8 @@ class PlayitMixin:
         playit = self._server_manager.playit_manager
         endpoint = str(playit.public_endpoint or "").strip()
         endpoint_for_this_server = ""
-        agent_running_for_this_server = False
         if playit.is_running:
             if self._server_info and playit.server_id == self._server_info.id:
-                agent_running_for_this_server = True
                 self._tunnel_row.set_subtitle("Running for this server")
                 endpoint_for_this_server = endpoint
                 self._tunnel_btn.set_label("Stop")
@@ -287,7 +293,7 @@ class PlayitMixin:
             self._java_tunnel_action_btn.set_tooltip_text("Add Java tunnel")
             self._java_tunnel_action_btn.remove_css_class("flat")
             self._java_tunnel_action_btn.add_css_class("flat")
-        
+
         # Show spinner when in progress, button otherwise
         if self._java_tunnel_in_progress:
             self._java_tunnel_action_btn.set_visible(False)
@@ -310,7 +316,7 @@ class PlayitMixin:
             self._bedrock_tunnel_action_btn.set_tooltip_text("Add Bedrock tunnel")
             self._bedrock_tunnel_action_btn.remove_css_class("flat")
             self._bedrock_tunnel_action_btn.add_css_class("flat")
-        
+
         # Show spinner when in progress, button otherwise
         if self._bedrock_in_progress:
             self._bedrock_tunnel_action_btn.set_visible(False)
@@ -351,7 +357,7 @@ class PlayitMixin:
             self._voicechat_tunnel_action_btn.set_tooltip_text("Add Voice Chat tunnel")
             self._voicechat_tunnel_action_btn.remove_css_class("flat")
             self._voicechat_tunnel_action_btn.add_css_class("flat")
-        
+
         # Show spinner when in progress, button otherwise
         if self._voicechat_in_progress:
             self._voicechat_tunnel_action_btn.set_visible(False)
@@ -501,8 +507,7 @@ class PlayitMixin:
         dialog = Adw.AlertDialog()
         dialog.set_heading(f"Delete {tunnel_name} tunnel?")
         dialog.set_body(
-            "This will remove the current tunnel domain for this server. "
-            "You can add a new tunnel again later."
+            "This will remove the current tunnel domain for this server. You can add a new tunnel again later."
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
@@ -683,10 +688,7 @@ class PlayitMixin:
             dialog.present(self.get_root())
             return
 
-        if (
-            self._has_mod_installed(server_dir, "geyser")
-            and self._has_mod_installed(server_dir, "floodgate")
-        ):
+        if self._has_mod_installed(server_dir, "geyser") and self._has_mod_installed(server_dir, "floodgate"):
             start_operation()
         else:
             self._confirm_required_mod_install(
@@ -788,7 +790,12 @@ class PlayitMixin:
         if playit.is_running:
             self._alert("Stop agent first", "Stop the playit agent before deleting Java tunnel.")
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
+        if (
+            self._java_tunnel_in_progress
+            or self._bedrock_in_progress
+            or self._voicechat_in_progress
+            or self._start_in_progress
+        ):
             self._toast("A tunnel operation is already in progress")
             return
 
@@ -834,7 +841,12 @@ class PlayitMixin:
         if playit.is_running:
             self._alert("Stop agent first", "Stop the playit agent before deleting Bedrock tunnel.")
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
+        if (
+            self._java_tunnel_in_progress
+            or self._bedrock_in_progress
+            or self._voicechat_in_progress
+            or self._start_in_progress
+        ):
             self._toast("A tunnel operation is already in progress")
             return
 
@@ -880,7 +892,12 @@ class PlayitMixin:
         if playit.is_running:
             self._alert("Stop agent first", "Stop the playit agent before deleting Voice Chat tunnel.")
             return
-        if self._java_tunnel_in_progress or self._bedrock_in_progress or self._voicechat_in_progress or self._start_in_progress:
+        if (
+            self._java_tunnel_in_progress
+            or self._bedrock_in_progress
+            or self._voicechat_in_progress
+            or self._start_in_progress
+        ):
             self._toast("A tunnel operation is already in progress")
             return
 
@@ -918,27 +935,27 @@ class PlayitMixin:
 
     def _has_mod_installed(self, server_dir: str, *mod_patterns: str) -> bool:
         """Check if any of the given mod patterns are installed in the server.
-        
+
         Args:
             server_dir: The server directory path
             *mod_patterns: One or more mod name patterns to search for (case-insensitive, no extension)
-        
+
         Returns:
             True if any mod matching the patterns is found, False otherwise
         """
         mods_dir = Path(server_dir) / "mods"
         if not mods_dir.exists():
             return False
-        
+
         # Get all jar files in mods directory
         installed_mods = {f.stem.lower() for f in mods_dir.glob("*.jar")}
-        
+
         # Check if any of the patterns match an installed mod
         for pattern in mod_patterns:
             pattern_lower = pattern.lower()
             # Normalize pattern: remove hyphens for matching
             pattern_normalized = pattern_lower.replace("-", "")
-            
+
             for mod_name in installed_mods:
                 # Check if pattern is in mod name or mod name starts with pattern
                 if pattern_lower in mod_name or mod_name.startswith(pattern_lower):
@@ -947,7 +964,7 @@ class PlayitMixin:
                 mod_normalized = mod_name.replace("-", "")
                 if pattern_normalized in mod_normalized or mod_normalized.startswith(pattern_normalized):
                     return True
-        
+
         return False
 
     def _exact_compatible_modrinth_version(self, project_id: str):
@@ -1001,7 +1018,9 @@ class PlayitMixin:
                 req[dep_key] = sorted(parents)
 
                 dep_project_id = str(getattr(dep, "project_id", "") or "").strip()
-                dep_title = str(getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id or dep_key).strip()
+                dep_title = str(
+                    getattr(dep, "title", "") or getattr(dep, "name", "") or dep_project_id or dep_key
+                ).strip()
                 dep_filename = str(getattr(dep, "filename", "") or "").strip()
                 if dep_project_id and dep_filename:
                     self._record_tunnel_installed_mod(
@@ -1065,10 +1084,10 @@ class PlayitMixin:
         dialog.set_heading(f"Add {tunnel_name} tunnel?")
         names = ", ".join(title for _project_id, title in mods)
         dialog.set_body(f"This tunnel needs {names}. Hosty can install compatible Fabric versions automatically.")
-        
+
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("install", "Install Mods")
-        
+
         dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("install")
         dialog.set_close_response("cancel")

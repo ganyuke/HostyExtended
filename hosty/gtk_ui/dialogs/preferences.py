@@ -1,21 +1,23 @@
 """
 Application preferences window
 """
+
 from __future__ import annotations
 
 import os
 import sys
 
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Adw, Gtk, GLib, Gio
 
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk
+
+from hosty.shared.backend.preferences_manager import PreferencesManager
+from hosty.shared.backend.server_manager import ServerManager
 from hosty.shared.utils.constants import (
     DATA_DIR,
 )
-from hosty.shared.backend.preferences_manager import PreferencesManager
-from hosty.shared.backend.server_manager import ServerManager
 
 
 def _open_data_folder() -> None:
@@ -28,9 +30,12 @@ def _open_data_folder() -> None:
     Gio.AppInfo.launch_default_for_uri(DATA_DIR.as_uri())
 
 
-def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager, server_manager: ServerManager | None = None):
+def show_preferences_window(
+    parent: Gtk.Window, preferences: PreferencesManager, server_manager: ServerManager | None = None
+):
     win = Adw.PreferencesDialog()
-    # Properties like default_size or modal are usually handled slightly differently in Adw.Dialog if at all, but we can set them if supported or skip them.
+    # Properties like default_size or modal are handled differently in Adw.Dialog
+    # if at all, but we can set them if supported or skip them.
 
     page = Adw.PreferencesPage(title="General")
     group = Adw.PreferencesGroup(
@@ -48,7 +53,7 @@ def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager,
         title="Run in background",
     )
     bg_row.set_active(preferences.run_in_background_on_close)
-    
+
     startup_row = Adw.SwitchRow(
         title="Open Hosty on startup",
     )
@@ -59,17 +64,19 @@ def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager,
         active = row.get_active()
         preferences.run_in_background_on_close = active
         startup_row.set_sensitive(active)
-        
+
         if not active and startup_row.get_active():
             startup_row.set_active(False)
-        
+
         if active:
             # If turning on background
             from hosty.shared.utils.portal import request_background
+
             def on_bg_response(success, bg, auto, err):
                 if not success or not bg:
                     GLib.idle_add(row.set_active, False)
                     GLib.idle_add(preferences.__setattr__, "run_in_background_on_close", False)
+
             request_background(False, on_bg_response)
 
     bg_row.connect("notify::active", on_bg_toggled)
@@ -77,16 +84,18 @@ def show_preferences_window(parent: Gtk.Window, preferences: PreferencesManager,
     def on_startup_toggled(row, _pspec):
         active = row.get_active()
         preferences.open_on_startup = active
-        
+
         from hosty.shared.utils.portal import request_background
+
         def on_start_response(success, bg, auto, err):
             if active and (not success or not auto):
                 GLib.idle_add(row.set_active, False)
                 GLib.idle_add(preferences.__setattr__, "open_on_startup", False)
+
         request_background(active, on_start_response)
 
     startup_row.connect("notify::active", on_startup_toggled)
-    
+
     group.add(bg_row)
     group.add(startup_row)
 

@@ -1,6 +1,7 @@
 """
 Playit setup dialog.
 """
+
 from __future__ import annotations
 
 import subprocess
