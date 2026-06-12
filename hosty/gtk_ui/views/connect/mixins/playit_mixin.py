@@ -63,8 +63,10 @@ class PlayitMixin:
         if updates:
             self._cfg.update(updates)
 
-        return save_playit_config(
-            root,
+        # Load existing config from disk so disk-level changes (e.g. port reassignment
+        # from server_detail view) are never overwritten by stale self._cfg values.
+        existing = load_playit_config(root)
+        existing.update(
             {
                 "secret": str(self._cfg.get("secret", "")).strip(),
                 "enabled": bool(self._cfg.get("enabled", False)),
@@ -74,8 +76,12 @@ class PlayitMixin:
                 "java_endpoint": str(self._cfg.get("java_endpoint", "")).strip(),
                 "bedrock_endpoint": str(self._cfg.get("bedrock_endpoint", "")).strip(),
                 "voicechat_endpoint": str(self._cfg.get("voicechat_endpoint", "")).strip(),
+                # Only update port if the caller explicitly passed it
+                **({"bedrock_port": updates["bedrock_port"]} if updates and "bedrock_port" in updates else {}),
+                **({"voicechat_port": updates["voicechat_port"]} if updates and "voicechat_port" in updates else {}),
             },
         )
+        return save_playit_config(root, existing)
 
     def _clear_tunnel_endpoint_for_all_servers(self, endpoint_key: str) -> None:
         """Clear a tunnel endpoint configuration for all servers."""
@@ -104,6 +110,8 @@ class PlayitMixin:
                         "voicechat_endpoint": ""
                         if endpoint_key == "voicechat_endpoint"
                         else str(cfg.get("voicechat_endpoint", "")).strip(),
+                        "bedrock_port": int(cfg.get("bedrock_port", 19132)),
+                        "voicechat_port": int(cfg.get("voicechat_port", 24454)),
                     },
                 )
             except Exception:
@@ -145,6 +153,8 @@ class PlayitMixin:
                             "java_endpoint": java_endpoint,
                             "bedrock_endpoint": bedrock_endpoint,
                             "voicechat_endpoint": voicechat_endpoint,
+                            "bedrock_port": int(cfg.get("bedrock_port", 19132)),
+                            "voicechat_port": int(cfg.get("voicechat_port", 24454)),
                         },
                     )
             except Exception:
@@ -223,22 +233,13 @@ class PlayitMixin:
             return
 
         playit = self._server_manager.playit_manager
-        endpoint = str(playit.public_endpoint or "").strip()
-        endpoint_for_this_server = ""
+        endpoint_for_this_server = playit.get_endpoint_for(self._server_info.id) if self._server_info else ""
         if playit.is_running:
-            if self._server_info and playit.server_id == self._server_info.id:
-                self._tunnel_row.set_subtitle("Running for this server")
-                endpoint_for_this_server = endpoint
-                self._tunnel_btn.set_label("Stop")
-                self._tunnel_btn.remove_css_class("suggested-action")
-                self._tunnel_btn.add_css_class("destructive-action")
-                self._tunnel_btn.set_sensitive(True)
-            else:
-                self._tunnel_row.set_subtitle("Running for another server")
-                self._tunnel_btn.set_label("Start")
-                self._tunnel_btn.remove_css_class("destructive-action")
-                self._tunnel_btn.add_css_class("suggested-action")
-                self._tunnel_btn.set_sensitive(False)
+            self._tunnel_row.set_subtitle("Running")
+            self._tunnel_btn.set_label("Stop")
+            self._tunnel_btn.remove_css_class("suggested-action")
+            self._tunnel_btn.add_css_class("destructive-action")
+            self._tunnel_btn.set_sensitive(True)
         else:
             self._tunnel_row.set_subtitle("Stopped")
             self._tunnel_btn.set_label("Start")
@@ -369,8 +370,7 @@ class PlayitMixin:
             self._voicechat_tunnel_spinner.set_spinning(False)
 
         tunnel_actions_locked = bool(
-            playit.is_running
-            or self._start_in_progress
+            self._start_in_progress
             or self._java_tunnel_in_progress
             or self._bedrock_in_progress
             or self._voicechat_in_progress
@@ -400,7 +400,7 @@ class PlayitMixin:
         if not endpoint and self._server_manager and self._server_info:
             playit = self._server_manager.playit_manager
             if playit.is_running_for(self._server_info.id):
-                endpoint = str(playit.public_endpoint or "").strip()
+                endpoint = str(playit.get_endpoint_for(self._server_info.id) or "").strip()
         if not endpoint:
             return
 
@@ -475,7 +475,7 @@ class PlayitMixin:
         if not self._server_manager:
             return
         playit = self._server_manager.playit_manager
-        if playit.is_running and self._server_info and playit.server_id == self._server_info.id:
+        if playit.is_running:
             self._on_stop()
         else:
             self._on_start()
@@ -552,10 +552,6 @@ class PlayitMixin:
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
             return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before changing Java tunnel settings.")
-            return
         if self._start_in_progress:
             self._toast("Playit startup is already in progress")
             return
@@ -623,10 +619,6 @@ class PlayitMixin:
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
             return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before changing Bedrock tunnel settings.")
-            return
         if self._start_in_progress:
             self._toast("Playit startup is already in progress")
             return
@@ -643,17 +635,80 @@ class PlayitMixin:
         secret = str(self._cfg.get("secret", "")).strip()
         had_bedrock_tunnel = bool(str(self._cfg.get("bedrock_endpoint", "")).strip())
 
+        conflict_port = self._server_manager.check_bedrock_port_conflict(server_id)
+        if conflict_port is not None:
+            self._confirm_bedrock_port_change(server_id, conflict_port)
+            return
+
+        had_bedrock_tunnel = bool(str(self._cfg.get("bedrock_endpoint", "")).strip())
+        self._maybe_create_bedrock_tunnel(server_id, server_dir, secret, had_bedrock_tunnel)
+
+    def _confirm_bedrock_port_change(self, server_id: str, conflict_port: int):
+        conflict_name = "another server"
+        for sid, info in self._server_manager._servers.items():
+            if sid == server_id:
+                continue
+            if self._server_manager.get_bedrock_port(sid) == conflict_port:
+                cinfo = self._server_manager.get_server(sid)
+                if cinfo:
+                    conflict_name = f'"{cinfo.name}"'
+                break
+
+        def on_conflict(dialog, response):
+            if response != "change-port":
+                return
+            warn = Adw.AlertDialog.new(
+                "Change Bedrock Port?",
+                "Changing the bedrock port will change the server address. "
+                "Players will need to use the new address to connect.",
+            )
+            warn.add_response("cancel", "Cancel")
+            warn.add_response("change", "Change Port")
+            warn.set_default_response("cancel")
+            warn.set_close_response("cancel")
+            warn.connect("response", self._on_bedrock_port_change_confirmed)
+            warn.present(self.get_root())
+
+        dialog = Adw.AlertDialog.new(
+            "Port Conflict",
+            f"Bedrock port {conflict_port} is already in use by {conflict_name}. "
+            f"Choose a different port.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("change-port", "Change Port")
+        dialog.set_default_response("change-port")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", on_conflict)
+        dialog.present(self.get_root())
+
+    def _on_bedrock_port_change_confirmed(self, warn, response):
+        if response != "change" or not self._server_info:
+            return
+        server_id = self._server_info.id
+        new_port = self._server_manager.assign_unique_bedrock_port(server_id)
+        self._cfg["bedrock_port"] = new_port
+        self._toast(f"Bedrock port changed to {new_port}")
+        self._maybe_create_bedrock_tunnel(
+            server_id,
+            str(self._server_info.server_dir),
+            str(self._cfg.get("secret", "")).strip(),
+            bool(str(self._cfg.get("bedrock_endpoint", "")).strip()),
+        )
+
+    def _maybe_create_bedrock_tunnel(self, server_id, server_dir, secret, had_bedrock_tunnel):
         def start_operation():
             self._bedrock_in_progress = True
             self._refresh_status_row()
 
             def run():
+                br_port = int(self._cfg.get("bedrock_port", 19132))
                 if had_bedrock_tunnel:
                     ok, msg, endpoint = self._server_manager.playit_manager.regenerate_bedrock_tunnel(
                         server_id,
                         server_dir,
                         secret=secret,
                         auto_install=True,
+                        bedrock_port=br_port,
                     )
                 else:
                     ok, msg, endpoint = self._server_manager.playit_manager.add_bedrock_tunnel(
@@ -661,6 +716,7 @@ class PlayitMixin:
                         server_dir,
                         secret=secret,
                         auto_install=True,
+                        bedrock_port=br_port,
                     )
 
                 def ui_done():
@@ -681,7 +737,8 @@ class PlayitMixin:
 
         if had_bedrock_tunnel:
             dialog = ManagePlayitTunnelDialog(
-                "Bedrock", "Minecraft Bedrock (UDP)", 19132, str(self._cfg.get("bedrock_endpoint", "")).strip()
+                "Bedrock", "Minecraft Bedrock (UDP)", int(self._cfg.get("bedrock_port", 19132)),
+                str(self._cfg.get("bedrock_endpoint", "")).strip()
             )
             dialog.connect("regenerate", lambda *_: self._confirm_regenerate_tunnel("Bedrock", start_operation))
             dialog.connect("delete", lambda *_: self._on_delete_bedrock_tunnel())
@@ -706,10 +763,6 @@ class PlayitMixin:
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
             return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before changing Voice Chat tunnel settings.")
-            return
         if self._start_in_progress:
             self._toast("Playit startup is already in progress")
             return
@@ -726,17 +779,79 @@ class PlayitMixin:
         secret = str(self._cfg.get("secret", "")).strip()
         had_voicechat_tunnel = bool(str(self._cfg.get("voicechat_endpoint", "")).strip())
 
+        conflict_port = self._server_manager.check_voicechat_port_conflict(server_id)
+        if conflict_port is not None:
+            self._confirm_voicechat_port_change(server_id, conflict_port)
+            return
+
+        self._maybe_create_voicechat_tunnel(server_id, server_dir, secret, had_voicechat_tunnel)
+
+    def _confirm_voicechat_port_change(self, server_id: str, conflict_port: int):
+        conflict_name = "another server"
+        for sid, info in self._server_manager._servers.items():
+            if sid == server_id:
+                continue
+            if self._server_manager.get_voicechat_port(sid) == conflict_port:
+                cinfo = self._server_manager.get_server(sid)
+                if cinfo:
+                    conflict_name = f'"{cinfo.name}"'
+                break
+
+        def on_conflict(dialog, response):
+            if response != "change-port":
+                return
+            warn = Adw.AlertDialog.new(
+                "Change Voice Chat Port?",
+                "Changing the voice chat port will change the server address. "
+                "Players will need to use the new address to connect.",
+            )
+            warn.add_response("cancel", "Cancel")
+            warn.add_response("change", "Change Port")
+            warn.set_default_response("cancel")
+            warn.set_close_response("cancel")
+            warn.connect("response", self._on_voicechat_port_change_confirmed)
+            warn.present(self.get_root())
+
+        dialog = Adw.AlertDialog.new(
+            "Port Conflict",
+            f"Voice Chat port {conflict_port} is already in use by {conflict_name}. "
+            f"Choose a different port.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("change-port", "Change Port")
+        dialog.set_default_response("change-port")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", on_conflict)
+        dialog.present(self.get_root())
+
+    def _on_voicechat_port_change_confirmed(self, warn, response):
+        if response != "change" or not self._server_info:
+            return
+        server_id = self._server_info.id
+        new_port = self._server_manager.assign_unique_voicechat_port(server_id)
+        self._cfg["voicechat_port"] = new_port
+        self._toast(f"Voice Chat port changed to {new_port}")
+        self._maybe_create_voicechat_tunnel(
+            server_id,
+            str(self._server_info.server_dir),
+            str(self._cfg.get("secret", "")).strip(),
+            bool(str(self._cfg.get("voicechat_endpoint", "")).strip()),
+        )
+
+    def _maybe_create_voicechat_tunnel(self, server_id, server_dir, secret, had_voicechat_tunnel):
         def start_operation():
             self._voicechat_in_progress = True
             self._refresh_status_row()
 
             def run():
+                vc_port = int(self._cfg.get("voicechat_port", 24454))
                 if had_voicechat_tunnel:
                     ok, msg, endpoint = self._server_manager.playit_manager.regenerate_voicechat_tunnel(
                         server_id,
                         server_dir,
                         secret=secret,
                         auto_install=True,
+                        voicechat_port=vc_port,
                     )
                 else:
                     ok, msg, endpoint = self._server_manager.playit_manager.add_voicechat_tunnel(
@@ -744,6 +859,7 @@ class PlayitMixin:
                         server_dir,
                         secret=secret,
                         auto_install=True,
+                        voicechat_port=vc_port,
                     )
 
                 def ui_done():
@@ -764,7 +880,8 @@ class PlayitMixin:
 
         if had_voicechat_tunnel:
             dialog = ManagePlayitTunnelDialog(
-                "Voice Chat", "Simple Voice Chat (UDP)", 24454, str(self._cfg.get("voicechat_endpoint", "")).strip()
+                "Voice Chat", "Simple Voice Chat (UDP)", int(self._cfg.get("voicechat_port", 24454)),
+                str(self._cfg.get("voicechat_endpoint", "")).strip()
             )
             dialog.connect("regenerate", lambda *_: self._confirm_regenerate_tunnel("Voice Chat", start_operation))
             dialog.connect("delete", lambda *_: self._on_delete_voicechat_tunnel())
@@ -785,10 +902,6 @@ class PlayitMixin:
             return
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
-            return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before deleting Java tunnel.")
             return
         if (
             self._java_tunnel_in_progress
@@ -837,10 +950,6 @@ class PlayitMixin:
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
             return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before deleting Bedrock tunnel.")
-            return
         if (
             self._java_tunnel_in_progress
             or self._bedrock_in_progress
@@ -887,10 +996,6 @@ class PlayitMixin:
             return
         if not self._is_setup_complete():
             self._on_open_setup_dialog()
-            return
-        playit = self._server_manager.playit_manager
-        if playit.is_running:
-            self._alert("Stop agent first", "Stop the playit agent before deleting Voice Chat tunnel.")
             return
         if (
             self._java_tunnel_in_progress
@@ -1071,10 +1176,14 @@ class PlayitMixin:
         elif project_id == "floodgate":
             playit.configure_floodgate_mod(str(self._server_info.server_dir))
         elif project_id == "simple-voice-chat":
+            from hosty.shared.backend.playit_config import load_playit_config
+            vc_cfg = load_playit_config(self._server_info.server_dir)
+            vc_port = int(vc_cfg.get("voicechat_port", 24454))
             playit.configure_voicechat_mod(
                 str(self._server_info.server_dir),
                 self._server_info.id,
-                endpoint=str(self._cfg.get("voicechat_endpoint", "")).strip(),
+                endpoint=str(vc_cfg.get("voicechat_endpoint", "")).strip(),
+                voicechat_port=vc_port,
             )
 
         return True, f"Installed {title}"
@@ -1179,11 +1288,24 @@ class PlayitMixin:
         def run():
             ok, msg = worker()
             if ok:
-                self._server_manager.playit_manager.verify_playit_mod_configs(
+                self._server_manager.resolve_playit_port_conflicts(server_id)
+                cfg = load_playit_config(server_dir)
+                br_port = int(cfg.get("bedrock_port", 19132))
+                vc_port = int(cfg.get("voicechat_port", 24454))
+                playit = self._server_manager.playit_manager
+                playit.auto_create_tunnel_mods(
+                    server_id, server_dir,
+                    secret=secret,
+                    bedrock_port=br_port,
+                    voicechat_port=vc_port,
+                )
+                playit.verify_playit_mod_configs(
                     server_dir,
                     server_id,
-                    bedrock_endpoint=str(self._cfg.get("bedrock_endpoint", "")).strip(),
-                    voicechat_endpoint=str(self._cfg.get("voicechat_endpoint", "")).strip(),
+                    bedrock_endpoint=str(cfg.get("bedrock_endpoint", "")).strip(),
+                    voicechat_endpoint=str(cfg.get("voicechat_endpoint", "")).strip(),
+                    bedrock_port=br_port,
+                    voicechat_port=vc_port,
                 )
 
             def ui_done():
@@ -1201,11 +1323,6 @@ class PlayitMixin:
     def _on_stop(self, *_args):
         if not self._server_manager:
             return
-
-        if self._server_info and self._auto_start_row.get_active() and self._server_running():
-            root = self.get_root()
-            if root and hasattr(root, "pause_playit_auto_start_for_running_server"):
-                root.pause_playit_auto_start_for_running_server(self._server_info.id)
 
         ok, msg = self._server_manager.playit_manager.stop()
         self._refresh_status_row()

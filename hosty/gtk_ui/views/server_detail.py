@@ -32,14 +32,15 @@ class ServerDetailView(Gtk.Box):
         self._toast_overlay = toast_overlay
         self._current_server: ServerInfo | None = None
         self._selected_process: ServerProcess | None = None
-        self._console_attached_process: ServerProcess | None = None
         self._selected_status_handler_id = None
-        self._running_status_handler_id = None
-        self._running_watched_process: ServerProcess | None = None
         self._mods_operation_handler_id = None
+        self._general_status_connected: set[int] = set()
 
         self._tab_hosts: dict[str, Gtk.Box] = {}
-        self._console_view: ConsoleView | None = None
+        self._console_views: dict[str, ConsoleView] = {}
+        self._console_stack: Gtk.Stack = Gtk.Stack()
+        self._console_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._console_stack.set_transition_duration(150)
         self._connect_view: ConnectView | None = None
         self._perf_view: PerformanceView | None = None
         self._props_view: PropertiesView | None = None
@@ -78,18 +79,14 @@ class ServerDetailView(Gtk.Box):
 
         self._toolbar_view.add_top_bar(self._header)
 
-        # ===== Content: shared banner (all tabs) + view stack =====
-        self._selection_banner = Adw.Banner()
-        self._selection_banner.add_css_class("selection-context-banner")
-        self._selection_banner.set_revealed(False)
-        self._selection_banner.set_visible(False)
-
+        # ===== Content: view stack =====
         self._view_stack = Adw.ViewStack()
         self._view_stack.set_vexpand(True)
         self._view_stack.connect("notify::visible-child-name", self._on_tab_changed)
         self._view_switcher_title.set_stack(self._view_stack)
 
         self._add_lazy_tab("console", "Console", "utilities-terminal-symbolic")
+        self._tab_hosts["console"].append(self._console_stack)
         self._add_lazy_tab("connect", "Connect", "network-workgroup-symbolic")
         self._add_lazy_tab("performance", "Performance", "power-profile-performance-symbolic")
         self._add_lazy_tab("properties", "Properties", "emblem-system-symbolic")
@@ -114,6 +111,7 @@ class ServerDetailView(Gtk.Box):
         self._mods_operation_handler_id = self._server_manager.connect(
             "mods-operation-changed", self._on_mods_operation_changed
         )
+        self._server_manager.connect("server-removed", self._on_server_removed)
 
     def _add_lazy_tab(self, name: str, title: str, icon: str):
         host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -122,13 +120,14 @@ class ServerDetailView(Gtk.Box):
         self._tab_hosts[name] = host
         self._view_stack.add_titled_with_icon(host, name, title, icon)
 
-    def _ensure_console_view(self) -> ConsoleView:
-        if self._console_view is None:
-            self._console_view = ConsoleView()
-            self._tab_hosts["console"].append(self._console_view)
-            if self._console_attached_process:
-                self._console_view.set_process(self._console_attached_process)
-        return self._console_view
+    def _ensure_console_view(self, server_id: str) -> ConsoleView:
+        if server_id not in self._console_views:
+            cv = ConsoleView()
+            proc = self._server_manager.get_process(server_id)
+            cv.set_process(proc)
+            self._console_stack.add_named(cv, server_id)
+            self._console_views[server_id] = cv
+        return self._console_views[server_id]
 
     def _ensure_connect_view(self) -> ConnectView:
         if self._connect_view is None:
@@ -142,8 +141,8 @@ class ServerDetailView(Gtk.Box):
         if self._perf_view is None:
             self._perf_view = PerformanceView()
             self._tab_hosts["performance"].append(self._perf_view)
-            if self._console_attached_process:
-                self._perf_view.set_process(self._console_attached_process)
+            if self._selected_process:
+                self._perf_view.set_process(self._selected_process)
                 self._sync_perf_with_io_process()
         return self._perf_view
 
@@ -198,7 +197,18 @@ class ServerDetailView(Gtk.Box):
         # Get/create the server process for the selected server (start/stop, status row)
         selected = self._server_manager.get_process(server_info.id)
         self._set_selected_process(selected)
-        self._attach_io_to_running_or_selected(server_info)
+
+        # Ensure a per-server console view exists and show it
+        self._ensure_console_view(server_info.id)
+        self._console_stack.set_visible_child_name(server_info.id)
+
+        # Ensure console views for all currently-running processes so they buffer in background
+        self._connect_general_status_handlers()
+
+        # Perf follows the selected server
+        if self._perf_view:
+            self._perf_view.set_process(selected)
+            self._sync_perf_with_io_process()
 
         self._ensure_connect_view().set_server(server_info, self._server_manager)
 
@@ -223,80 +233,35 @@ class ServerDetailView(Gtk.Box):
         if process:
             self._selected_status_handler_id = process.connect("status-changed", self._on_selected_status_changed)
 
-    def _set_running_status_watch(self, process: ServerProcess | None):
-        """When viewing a different server than the one running, watch the runner for stop."""
-        if self._running_status_handler_id and self._running_watched_process:
-            try:
-                self._running_watched_process.disconnect(self._running_status_handler_id)
-            except Exception:
-                pass
-        self._running_status_handler_id = None
-        self._running_watched_process = None
-        if process and process is not self._selected_process:
-            self._running_watched_process = process
-            self._running_status_handler_id = process.connect("status-changed", self._on_running_status_changed)
 
-    def _on_running_status_changed(self, process, status):
-        """When the running server stops while another is selected, refresh attachment."""
-        if self._current_server and not process.is_running:
-            GLib.idle_add(lambda: self.load_server(self._current_server) if self._current_server else None)
-
-    def _set_selection_context_banner(self, running_name: str | None, selected_name: str | None):
-        """One line under the header, visible on Console, Performance, and Properties."""
-        if running_name and selected_name:
-            self._selection_banner.set_title(
-                f'Console and performance use "{running_name}" (running). Sidebar selection is "{selected_name}".'
-            )
-            self._selection_banner.set_visible(True)
-            self._selection_banner.set_revealed(True)
-        else:
-            self._selection_banner.set_revealed(False)
-            self._selection_banner.set_visible(False)
-
-    def _attach_io_to_running_or_selected(self, server_info: ServerInfo):
-        """
-        Console and Performance follow the running server if exactly one is running
-        and the user selected a different server — only one process can run at a time.
-        """
-        running_id = self._server_manager.get_running_server_id()
-        if running_id and running_id != server_info.id:
-            io_process = self._server_manager.get_process(running_id)
-            running_info = self._server_manager.get_server(running_id)
-            rn = running_info.name if running_info else "Server"
-            self._set_selection_context_banner(rn, server_info.name)
-            self._set_running_status_watch(io_process)
-        else:
-            self._set_selection_context_banner(None, None)
-            io_process = self._selected_process
-            self._set_running_status_watch(None)
-
-        if io_process is None:
-            self._console_attached_process = None
-            self._sync_perf_with_io_process()
-            return
-
-        # Clear console only when switching to a different attached process object
-        prev = self._console_attached_process
-        if prev is not None and prev is not io_process and self._console_view:
-            self._console_view.clear()
-        self._console_attached_process = io_process
-
-        if self._console_view:
-            self._console_view.set_process(io_process)
-        if self._perf_view:
-            self._perf_view.set_process(io_process)
-        self._sync_perf_with_io_process()
 
     def _sync_perf_with_io_process(self):
-        """Perf follows the process attached to the console (running server or selection)."""
+        """Perf follows the selected server's process."""
         if not self._perf_view:
             return
-        p = self._console_attached_process
+        p = self._selected_process
         if p and p.is_running:
             self._perf_view.start_monitoring()
         else:
             self._perf_view.stop_monitoring()
             self._perf_view.reset()
+
+    def _connect_general_status_handlers(self):
+        for sid in self._server_manager.get_running_server_ids():
+            self._ensure_console_view(sid)
+            proc = self._server_manager.get_process(sid)
+            pid = id(proc)
+            if pid not in self._general_status_connected:
+                proc.connect("status-changed", self._on_process_status_changed)
+                self._general_status_connected.add(pid)
+
+    def _on_process_status_changed(self, process, status):
+        """Ensure console view exists whenever any server starts, so output buffers in background."""
+        if status == ServerStatus.RUNNING or status == ServerStatus.STARTING:
+            for sid, p in self._server_manager._processes.items():
+                if p is process:
+                    self._ensure_console_view(sid)
+                    break
 
     def _on_selected_status_changed(self, process, status):
         """Handle selected server's process status (Start/Stop button)."""
@@ -328,18 +293,19 @@ class ServerDetailView(Gtk.Box):
             self._toggle_btn.set_label("Start")
             self._toggle_btn.remove_css_class("destructive-action")
             self._toggle_btn.add_css_class("suggested-action")
-            blocked = (
-                self._server_manager.is_any_server_running()
-                and self._selected_process is not None
-                and not self._selected_process.is_running
-            )
-            self._toggle_btn.set_sensitive((not blocked) and (not mods_busy))
+            self._toggle_btn.set_sensitive(not mods_busy)
             if mods_busy:
                 self._toggle_btn.set_tooltip_text("Mods are currently installing/updating")
-            elif blocked:
-                self._toggle_btn.set_tooltip_text("Another server is already running")
             else:
                 self._toggle_btn.set_tooltip_text(None)
+
+    def _on_server_removed(self, _manager, server_id: str):
+        cv = self._console_views.pop(server_id, None)
+        if cv is not None:
+            try:
+                self._console_stack.remove(cv)
+            except Exception:
+                pass
 
     def _on_mods_operation_changed(self, _manager, server_id: str, _active: bool, _count: int):
         if not self._current_server:
@@ -353,7 +319,9 @@ class ServerDetailView(Gtk.Box):
         """Keep tab navigation predictable when changing pages."""
         tab_name = stack.get_visible_child_name()
         if tab_name == "console":
-            self._ensure_console_view()
+            if self._current_server:
+                self._ensure_console_view(self._current_server.id)
+                self._console_stack.set_visible_child_name(self._current_server.id)
         elif tab_name == "connect":
             self._ensure_connect_view()
         elif tab_name == "performance":
@@ -371,6 +339,106 @@ class ServerDetailView(Gtk.Box):
         """Refresh lightweight live UI bits from the window polling loop."""
         if self._view_stack.get_visible_child_name() == "files":
             self._ensure_files_view().refresh_worlds_if_changed()
+
+    def _on_port_change_confirmed(self, response: str):
+        if response != "change" or not self._current_server:
+            return
+        new_port = self._server_manager.assign_unique_port(self._current_server.id)
+        if self._toast_overlay:
+            self._toast_overlay.add_toast(Adw.Toast.new(f"Port changed to {new_port}"))
+        if self._selected_process and not self._selected_process.is_running:
+            vc_port = self._server_manager.get_voicechat_port(self._current_server.id)
+            self._server_manager.playit_manager.configure_voicechat_mod(
+                str(self._current_server.server_dir), self._current_server.id,
+                voicechat_port=vc_port,
+            )
+            self._selected_process.start()
+
+    def _find_conflicting_server_name(self, port_check_fn) -> str:
+        """Return the name of the first server that conflicts on the given port check."""
+        if not self._current_server:
+            return "another server"
+        for sid, info in self._server_manager._servers.items():
+            if sid == self._current_server.id:
+                continue
+            if port_check_fn(sid):
+                cinfo = self._server_manager.get_server(sid)
+                if cinfo:
+                    return f'"{cinfo.name}"'
+        return "another server"
+
+    def _show_port_conflict_dialog(self, port_label: str, port: int, conflict_label: str, on_change):
+        conflict_name = "another server"
+        if port_label == "port":
+            conflict_name = self._find_conflicting_server_name(
+                lambda sid: self._server_manager.check_port_conflict(sid) == port
+            )
+        elif port_label == "bedrock port":
+            conflict_name = self._find_conflicting_server_name(
+                lambda sid: self._server_manager.get_bedrock_port(sid) == port
+            )
+        elif port_label == "Voice Chat port":
+            conflict_name = self._find_conflicting_server_name(
+                lambda sid: self._server_manager.get_voicechat_port(sid) == port
+            )
+
+        def on_conflict_response(_dialog, response):
+            if response != "change-port":
+                return
+            warn = Adw.AlertDialog.new(
+                f"Change {conflict_label.title()}?",
+                "Changing the port will change the server address. "
+                "Players will need to use the new address to connect.",
+            )
+            warn.add_response("cancel", "Cancel")
+            warn.add_response("change", "Change Port")
+            warn.set_default_response("cancel")
+            warn.set_close_response("cancel")
+            warn.connect("response", on_change)
+            warn.present(self.get_root())
+
+        dialog = Adw.AlertDialog.new(
+            "Port Conflict",
+            f"{port_label.title()} {port} is already in use by {conflict_name}. "
+            f"Choose a different port to start this server.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("change-port", "Change Port")
+        dialog.set_default_response("change-port")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", on_conflict_response)
+        dialog.present(self.get_root())
+
+    def _on_bedrock_port_confirmed(self, response: str):
+        if response != "change" or not self._current_server:
+            return
+        new_port = self._server_manager.assign_unique_bedrock_port(self._current_server.id)
+        if self._toast_overlay:
+            self._toast_overlay.add_toast(Adw.Toast.new(f"Bedrock port changed to {new_port}"))
+        if self._selected_process and not self._selected_process.is_running:
+            self._server_manager.playit_manager.configure_geyser_mod(
+                str(self._current_server.server_dir), new_port
+            )
+            vc_port = self._server_manager.get_voicechat_port(self._current_server.id)
+            self._server_manager.playit_manager.configure_voicechat_mod(
+                str(self._current_server.server_dir), self._current_server.id,
+                voicechat_port=vc_port,
+            )
+            self._selected_process.start()
+
+    def _on_voicechat_port_confirmed(self, response: str):
+        if response != "change" or not self._current_server:
+            return
+        new_port = self._server_manager.assign_unique_voicechat_port(self._current_server.id)
+        if self._toast_overlay:
+            self._toast_overlay.add_toast(Adw.Toast.new(f"Voice Chat port changed to {new_port}"))
+        if self._selected_process and not self._selected_process.is_running:
+            vc_port = self._server_manager.get_voicechat_port(self._current_server.id)
+            self._server_manager.playit_manager.configure_voicechat_mod(
+                str(self._current_server.server_dir), self._current_server.id,
+                voicechat_port=vc_port,
+            )
+            self._selected_process.start()
 
     def _on_toggle_clicked(self, button):
         """Handle start/stop button click."""
@@ -392,23 +460,56 @@ class ServerDetailView(Gtk.Box):
                 dialog.present(self.get_root())
                 return
 
-            if self._server_manager.is_any_server_running():
-                dialog = Adw.AlertDialog.new(
-                    "Cannot Start Server",
-                    "Another server is already running. Please stop it first before starting a new one.",
-                )
-                dialog.add_response("ok", "OK")
-                dialog.present(self.get_root())
-                return
-
             if self._current_server:
+                conflict_port = self._server_manager.check_port_conflict(self._current_server.id)
+                if conflict_port is not None:
+                    self._show_port_conflict_dialog(
+                        "port", conflict_port, "server",
+                        lambda _w, r: self._on_port_change_confirmed(r),
+                    )
+                    return
+
+                br_conflict = self._server_manager.check_bedrock_port_conflict(self._current_server.id)
+                if br_conflict is not None:
+                    if not self._server_manager.has_bedrock_tunnel(self._current_server.id):
+                        new_br_port = self._server_manager.assign_unique_bedrock_port(self._current_server.id)
+                        self._server_manager.playit_manager.configure_geyser_mod(
+                            str(self._current_server.server_dir), new_br_port,
+                        )
+                    else:
+                        self._show_port_conflict_dialog(
+                            "bedrock port", br_conflict, "bedrock port",
+                            lambda _w, r: self._on_bedrock_port_confirmed(r),
+                        )
+                        return
+
+                vc_conflict = self._server_manager.check_voicechat_port_conflict(self._current_server.id)
+                if vc_conflict is not None:
+                    if not self._server_manager.has_voicechat_tunnel(self._current_server.id):
+                        new_vc_port = self._server_manager.assign_unique_voicechat_port(self._current_server.id)
+                        self._server_manager.playit_manager.configure_voicechat_mod(
+                            str(self._current_server.server_dir), self._current_server.id,
+                            voicechat_port=new_vc_port,
+                        )
+                    else:
+                        self._show_port_conflict_dialog(
+                            "Voice Chat port", vc_conflict, "voice chat port",
+                            lambda _w, r: self._on_voicechat_port_confirmed(r),
+                        )
+                        return
+
                 self._server_manager.playit_manager.configure_voicechat_mod(
-                    str(self._current_server.server_dir), self._current_server.id
+                    str(self._current_server.server_dir), self._current_server.id,
+                    voicechat_port=self._server_manager.get_voicechat_port(self._current_server.id),
                 )
             self._selected_process.start()
 
-    def get_console_view(self) -> ConsoleView:
-        return self._ensure_console_view()
+    def get_console_view(self, server_id: str | None = None) -> ConsoleView | None:
+        if server_id and server_id in self._console_views:
+            return self._console_views[server_id]
+        if self._current_server:
+            return self._ensure_console_view(self._current_server.id)
+        return next(iter(self._console_views.values())) if self._console_views else None
 
     def get_perf_view(self) -> PerformanceView:
         return self._ensure_perf_view()

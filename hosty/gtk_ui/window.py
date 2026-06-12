@@ -26,9 +26,9 @@ class HostyWindow(Adw.ApplicationWindow):
         self._server_manager = server_manager
         self._current_server_id = None
         self._status_poll_id = None
-        self._last_running_server_id = self._server_manager.get_running_server_id()
-        self._playit_starting_server_id = None
-        self._playit_autostart_paused_server_id: str | None = None
+        self._running_server_ids: set[str] = set(self._server_manager.get_running_server_ids())
+        self._playit_starting_server_ids: set[str] = set()
+        self._playit_autostart_paused_ids: set[str] = set()
 
         self.set_title("Hosty")
         try:
@@ -141,7 +141,7 @@ class HostyWindow(Adw.ApplicationWindow):
 
             from hosty.shared.utils.portal import set_background_status
 
-            if self._server_manager.get_running_server_id():
+            if self._server_manager.is_any_server_running():
                 set_background_status("Server running")
             else:
                 set_background_status("Server not running")
@@ -210,31 +210,33 @@ class HostyWindow(Adw.ApplicationWindow):
     def _poll_runtime_state(self):
         self._detail_view.poll_runtime_state()
 
-        running_id = self._server_manager.get_running_server_id()
-        prefs = self._server_manager.preferences
+        current_ids = set(self._server_manager.get_running_server_ids())
+        previous_ids = self._running_server_ids
+        self._running_server_ids = current_ids
 
-        if running_id != self._last_running_server_id:
-            previous_id = self._last_running_server_id
-            self._last_running_server_id = running_id
+        from hosty.shared.utils.portal import set_background_status
 
-            from hosty.shared.utils.portal import set_background_status
-
-            if running_id:
-                set_background_status("Server running")
-            else:
-                set_background_status("Server not running")
-
-            if running_id:
-                self._apply_playit_runtime(previous_id, running_id)
-            else:
-                self._apply_playit_runtime(previous_id, None)
-
-                if previous_id:
-                    if prefs.auto_backup_on_stop:
-                        self._start_auto_backup(previous_id)
+        if current_ids:
+            set_background_status(f"{len(current_ids)} server(s) running")
         else:
-            # Keep playit in sync even when server runtime does not change.
-            self._apply_playit_runtime(None, running_id)
+            set_background_status("Server not running")
+
+        # Servers that stopped since last poll
+        stopped_ids = previous_ids - current_ids
+        for sid in stopped_ids:
+            self._apply_playit_runtime(sid, "stop")
+            prefs = self._server_manager.preferences
+            if prefs.auto_backup_on_stop:
+                self._start_auto_backup(sid)
+
+        # Servers that started since last poll
+        started_ids = current_ids - previous_ids
+        for sid in started_ids:
+            self._apply_playit_runtime(sid, "start")
+
+        # Keep playit in sync for all running servers
+        for sid in current_ids:
+            self._apply_playit_runtime(sid, None)
 
         return True
 
@@ -244,62 +246,68 @@ class HostyWindow(Adw.ApplicationWindow):
             return {}
         return load_playit_config(info.server_dir)
 
-    def _apply_playit_runtime(self, previous_id: str | None, running_id: str | None):
+    def _apply_playit_runtime(self, server_id: str, action: str | None):
         playit = self._server_manager.playit_manager
 
-        if (
-            running_id != self._playit_autostart_paused_server_id
-            and previous_id == self._playit_autostart_paused_server_id
-        ):
-            self._playit_autostart_paused_server_id = None
-
-        # Stop the current tunnel if the associated server stopped.
-        if previous_id and previous_id != running_id and playit.is_running_for(previous_id):
-            playit.stop()
-
-        if not running_id:
-            self._playit_autostart_paused_server_id = None
+        # Handle explicit stop action
+        if action == "stop":
+            if playit.is_running_for(server_id):
+                playit.stop_server(server_id)
+            self._playit_autostart_paused_ids.discard(server_id)
+            self._playit_starting_server_ids.discard(server_id)
             return
 
-        if running_id == self._playit_autostart_paused_server_id:
+        # Handle explicit start action or keep-alive check
+        if server_id in self._playit_autostart_paused_ids:
             return
 
-        cfg = self._load_playit_config(running_id)
+        cfg = self._load_playit_config(server_id)
         if not cfg.get("enabled", False):
             return
         if not cfg.get("auto_start", True):
             return
 
-        if playit.is_running_for(running_id):
+        if playit.is_running_for(server_id):
             return
 
-        if self._playit_starting_server_id == running_id:
+        if server_id in self._playit_starting_server_ids:
             return
 
-        info = self._server_manager.get_server(running_id)
+        info = self._server_manager.get_server(server_id)
         if not info:
             return
 
-        self._playit_starting_server_id = running_id
+        self._playit_starting_server_ids.add(server_id)
 
         def worker():
             ok, _msg = playit.start(
-                running_id,
+                server_id,
                 str(info.server_dir),
                 secret=str(cfg.get("secret", "")).strip(),
                 auto_install=bool(cfg.get("auto_install", True)),
             )
             if ok:
+                self._server_manager.resolve_playit_port_conflicts(server_id)
+                fresh_cfg = self._load_playit_config(server_id)
+                br_port = int(fresh_cfg.get("bedrock_port", 19132))
+                vc_port = int(fresh_cfg.get("voicechat_port", 24454))
+                playit.auto_create_tunnel_mods(
+                    server_id, str(info.server_dir),
+                    secret=str(fresh_cfg.get("secret", "")).strip(),
+                    bedrock_port=br_port,
+                    voicechat_port=vc_port,
+                )
                 playit.verify_playit_mod_configs(
                     str(info.server_dir),
-                    running_id,
-                    bedrock_endpoint=str(cfg.get("bedrock_endpoint", "")).strip(),
-                    voicechat_endpoint=str(cfg.get("voicechat_endpoint", "")).strip(),
+                    server_id,
+                    bedrock_endpoint=str(fresh_cfg.get("bedrock_endpoint", "")).strip(),
+                    voicechat_endpoint=str(fresh_cfg.get("voicechat_endpoint", "")).strip(),
+                    bedrock_port=br_port,
+                    voicechat_port=vc_port,
                 )
 
             def clear_starting_flag():
-                if self._playit_starting_server_id == running_id:
-                    self._playit_starting_server_id = None
+                self._playit_starting_server_ids.discard(server_id)
 
             GLib.idle_add(clear_starting_flag)
 
@@ -336,11 +344,10 @@ class HostyWindow(Adw.ApplicationWindow):
         self._toast_overlay.add_toast(toast)
 
     def pause_playit_auto_start_for_running_server(self, server_id: str):
-        self._playit_autostart_paused_server_id = server_id
+        self._playit_autostart_paused_ids.add(server_id)
 
     def clear_playit_auto_start_pause(self, server_id: str):
-        if self._playit_autostart_paused_server_id == server_id:
-            self._playit_autostart_paused_server_id = None
+        self._playit_autostart_paused_ids.discard(server_id)
 
     @property
     def sidebar(self):
