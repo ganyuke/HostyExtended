@@ -49,6 +49,7 @@ class ModrinthMixin:
         tv = Adw.ToolbarView()
         tv.set_hexpand(True)
         header = Adw.HeaderBar()
+        header.add_css_class("modrinth-header")
         self._modrinth_header = header
         header.set_show_start_title_buttons(True)
         header.set_show_end_title_buttons(False)
@@ -80,10 +81,8 @@ class ModrinthMixin:
         header.set_title_widget(search_outer)
         tv.add_top_bar(header)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.set_hexpand(True)
-        outer.set_margin_top(12)
-        outer.set_margin_bottom(18)
 
         project_type_items = [
             ("Mods", "mod"),
@@ -180,6 +179,7 @@ class ModrinthMixin:
         results.connect("row-activated", self._on_modrinth_row_activated)
         results.set_margin_start(12)
         results.set_margin_end(12)
+        results.set_margin_top(2)
 
         page_size = 20
         state = {"offset": 0, "total": 0, "busy": False, "all_loaded": False}
@@ -342,6 +342,7 @@ class ModrinthMixin:
         wire_filter_buttons(sort_buttons, selected_sort_idx)
 
         sw = Gtk.ScrolledWindow()
+        sw.add_css_class("mod-scroll")
         sw.set_vexpand(True)
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         clamp = Adw.Clamp()
@@ -1167,6 +1168,7 @@ class ModrinthMixin:
         content.append(open_btn)
 
         sw = Gtk.ScrolledWindow()
+        sw.add_css_class("mod-scroll")
         sw.set_vexpand(True)
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         clamp = Adw.Clamp()
