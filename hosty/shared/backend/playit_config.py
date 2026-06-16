@@ -16,6 +16,8 @@ DEFAULT_PLAYIT_CONFIG = {
     "java_endpoint": "",
     "bedrock_endpoint": "",
     "voicechat_endpoint": "",
+    "bedrock_port": 19132,
+    "voicechat_port": 24454,
 }
 
 
@@ -48,6 +50,14 @@ def load_playit_config(server_dir: str | Path) -> dict:
     cfg["java_endpoint"] = str(cfg.get("java_endpoint", "")).strip()
     cfg["bedrock_endpoint"] = str(cfg.get("bedrock_endpoint", "")).strip()
     cfg["voicechat_endpoint"] = str(cfg.get("voicechat_endpoint", "")).strip()
+    try:
+        cfg["bedrock_port"] = int(cfg.get("bedrock_port", 19132))
+    except Exception:
+        cfg["bedrock_port"] = 19132
+    try:
+        cfg["voicechat_port"] = int(cfg.get("voicechat_port", 24454))
+    except Exception:
+        cfg["voicechat_port"] = 24454
     return cfg
 
 
@@ -63,6 +73,14 @@ def save_playit_config(server_dir: str | Path, config: dict) -> bool:
     payload["java_endpoint"] = str(payload.get("java_endpoint", "")).strip()
     payload["bedrock_endpoint"] = str(payload.get("bedrock_endpoint", "")).strip()
     payload["voicechat_endpoint"] = str(payload.get("voicechat_endpoint", "")).strip()
+    try:
+        payload["bedrock_port"] = int(payload.get("bedrock_port", 19132))
+    except Exception:
+        payload["bedrock_port"] = 19132
+    try:
+        payload["voicechat_port"] = int(payload.get("voicechat_port", 24454))
+    except Exception:
+        payload["voicechat_port"] = 24454
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

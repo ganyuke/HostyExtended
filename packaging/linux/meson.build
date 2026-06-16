@@ -30,5 +30,5 @@ install_data(
 
 install_data(
   'sliders-horizontal-symbolic.svg',
-  install_dir: get_option('datadir') / 'icons/hicolor/symbolic/actions'
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/actions'
 )

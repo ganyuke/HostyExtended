@@ -112,20 +112,33 @@ button.playit-compact-button {
 /* ===== Mods UI ===== */
 .mod-results-list {
     background: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+.mod-scroll undershoot,
+.mod-scroll overshoot {
+    background: none;
 }
 
 .mod-card-row {
     border-radius: 12px;
     padding: 0;
+    margin-top: 0;
 }
 
 .modrinth-search-box {
     border-radius: 99px;
     background-color: alpha(currentColor, 0.06);
-    /* Thin transparent border by default */
     border: 2px solid transparent;
     padding: 1px 2px 1px 2px;
     transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+headerbar.modrinth-header {
+    box-shadow: none;
+    border-bottom: none;
 }
 
 .modrinth-search-box:focus-within {

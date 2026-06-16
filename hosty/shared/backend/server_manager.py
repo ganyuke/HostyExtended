@@ -14,6 +14,7 @@ from pathlib import Path
 from hosty.shared.backend.config_manager import ConfigManager
 from hosty.shared.backend.download_manager import DownloadManager
 from hosty.shared.backend.java_manager import JavaManager
+from hosty.shared.backend.playit_config import load_playit_config
 from hosty.shared.backend.playit_manager import PlayitManager
 from hosty.shared.backend.preferences_manager import PreferencesManager
 from hosty.shared.backend.server_process import ServerProcess
@@ -158,22 +159,21 @@ class ServerManager(EventEmitter):
             self.emit_on_main_thread("server-changed", server_id)
 
     def get_autostart_server(self) -> ServerInfo | None:
-        """Get the server configured to auto-start, if any."""
+        """Get the first server configured to auto-start, if any."""
         for server in self._servers.values():
             if server.autostart:
                 return server
         return None
+
+    def get_autostart_servers(self) -> list[ServerInfo]:
+        """Get all servers configured to auto-start."""
+        return [server for server in self._servers.values() if server.autostart]
 
     def set_server_autostart(self, server_id: str, autostart: bool) -> tuple[bool, str | None]:
         """Enable or disable autostart for a server. Returns (success, error_msg)."""
         info = self._servers.get(server_id)
         if not info:
             return False, "Server not found."
-
-        if autostart:
-            existing = self.get_autostart_server()
-            if existing and existing.id != server_id:
-                return False, f"Server '{existing.name}' is already configured to start on startup."
 
         info.autostart = autostart
         self._save()
@@ -960,7 +960,7 @@ class ServerManager(EventEmitter):
             return
 
         if self.playit_manager.is_running_for(server_id):
-            self.playit_manager.stop()
+            self.playit_manager.stop_server(server_id)
 
         # Stop if running
         process = self._processes.get(server_id)
@@ -1020,11 +1020,224 @@ class ServerManager(EventEmitter):
         """Check if any server is currently running."""
         return any(p.is_running for p in self._processes.values())
 
+    def get_running_server_ids(self) -> list[str]:
+        """Return all server ids whose processes are running."""
+        return [sid for sid, p in self._processes.items() if p.is_running]
+
     def get_running_server_id(self) -> str | None:
-        """Return the server id whose process is running, or None."""
+        """Return the first running server id, or None."""
         for server_id, process in self._processes.items():
             if process.is_running:
                 return server_id
+        return None
+
+    def get_used_ports(self) -> set[int]:
+        """Return ports in use by all servers' server.properties."""
+        ports: set[int] = set()
+        for sid, info in self._servers.items():
+            try:
+                cfg = self.get_config(sid)
+                if cfg:
+                    cfg.load()
+                    port = cfg.get_int("server-port", 25565)
+                    if 1024 <= port <= 65535:
+                        ports.add(port)
+            except Exception:
+                pass
+        return ports
+
+    def get_used_bedrock_ports(self) -> set[int]:
+        """Return the set of bedrock ports configured across all servers."""
+        ports: set[int] = set()
+        for sid, info in self._servers.items():
+            try:
+                cfg = load_playit_config(info.server_dir)
+                port = int(cfg.get("bedrock_port", 19132))
+                if 1024 <= port <= 65535:
+                    ports.add(port)
+            except Exception:
+                pass
+        return ports
+
+    def get_used_voicechat_ports(self) -> set[int]:
+        """Return the set of voicechat ports configured across all servers."""
+        ports: set[int] = set()
+        for sid, info in self._servers.items():
+            try:
+                cfg = load_playit_config(info.server_dir)
+                port = int(cfg.get("voicechat_port", 24454))
+                if 1024 <= port <= 65535:
+                    ports.add(port)
+            except Exception:
+                pass
+        return ports
+
+    def get_next_available_bedrock_port(self) -> int:
+        """Find the next unused bedrock port starting from 19132."""
+        used = self.get_used_bedrock_ports()
+        port = 19132
+        while port in used:
+            port += 1
+        return port
+
+    def get_next_available_voicechat_port(self) -> int:
+        """Find the next unused voicechat port starting from 24454."""
+        used = self.get_used_voicechat_ports()
+        port = 24454
+        while port in used:
+            port += 1
+        return port
+
+    def get_next_available_port(self, base: int = 25565) -> int:
+        """Find the next unused port starting from base."""
+        used = self.get_used_ports()
+        port = base
+        while port in used:
+            port += 1
+        return port
+
+    def set_java_port(self, server_id: str, port: int) -> None:
+        """Set the server port in server.properties."""
+        info = self._servers.get(server_id)
+        if not info:
+            return
+        cfg = self.get_config(server_id)
+        if cfg:
+            cfg.load()
+            cfg.set_value("server-port", port)
+            cfg.save()
+
+    def get_bedrock_port(self, server_id: str) -> int:
+        """Read the bedrock port from the server's playit config."""
+        info = self._servers.get(server_id)
+        if not info:
+            return 19132
+        try:
+            cfg = load_playit_config(info.server_dir)
+            return int(cfg.get("bedrock_port", 19132))
+        except Exception:
+            return 19132
+
+    def get_voicechat_port(self, server_id: str) -> int:
+        """Read the voicechat port from the server's playit config."""
+        info = self._servers.get(server_id)
+        if not info:
+            return 24454
+        try:
+            cfg = load_playit_config(info.server_dir)
+            return int(cfg.get("voicechat_port", 24454))
+        except Exception:
+            return 24454
+
+    def set_bedrock_port(self, server_id: str, port: int) -> None:
+        """Set the bedrock port in the server's playit config."""
+        info = self._servers.get(server_id)
+        if not info:
+            return
+        from hosty.shared.backend.playit_config import save_playit_config
+        cfg = load_playit_config(info.server_dir)
+        cfg["bedrock_port"] = port
+        save_playit_config(info.server_dir, cfg)
+
+    def set_voicechat_port(self, server_id: str, port: int) -> None:
+        """Set the voicechat port in the server's playit config."""
+        info = self._servers.get(server_id)
+        if not info:
+            return
+        from hosty.shared.backend.playit_config import save_playit_config
+        cfg = load_playit_config(info.server_dir)
+        cfg["voicechat_port"] = port
+        save_playit_config(info.server_dir, cfg)
+
+    def check_bedrock_port_conflict(self, server_id: str) -> int | None:
+        """Return the port if another running server uses the same bedrock port."""
+        port = self.get_bedrock_port(server_id)
+        if not self.has_bedrock_tunnel(server_id):
+            for sid in self._servers:
+                if sid != server_id and self.has_bedrock_tunnel(sid):
+                    break
+            else:
+                return None
+        for sid, info in self._servers.items():
+            if sid == server_id:
+                continue
+            proc = self._processes.get(sid)
+            if not proc or not proc.is_running:
+                continue
+            if self.get_bedrock_port(sid) == port:
+                return port
+        return None
+
+    def check_voicechat_port_conflict(self, server_id: str) -> int | None:
+        """Return the port if another running server uses the same voicechat port."""
+        port = self.get_voicechat_port(server_id)
+        if not self.has_voicechat_tunnel(server_id):
+            for sid in self._servers:
+                if sid != server_id and self.has_voicechat_tunnel(sid):
+                    break
+            else:
+                return None
+        for sid, info in self._servers.items():
+            if sid == server_id:
+                continue
+            proc = self._processes.get(sid)
+            if not proc or not proc.is_running:
+                continue
+            if self.get_voicechat_port(sid) == port:
+                return port
+        return None
+
+    def resolve_playit_port_conflicts(self, server_id: str) -> None:
+        """No-op: port conflicts are no longer auto-resolved."""
+
+    def has_bedrock_tunnel(self, server_id: str) -> bool:
+        """Check if a server has a bedrock tunnel configured."""
+        info = self._servers.get(server_id)
+        if not info:
+            return False
+        try:
+            cfg = load_playit_config(info.server_dir)
+            return bool(str(cfg.get("bedrock_endpoint", "")).strip())
+        except Exception:
+            return False
+
+    def has_voicechat_tunnel(self, server_id: str) -> bool:
+        """Check if a server has a voicechat tunnel configured."""
+        info = self._servers.get(server_id)
+        if not info:
+            return False
+        try:
+            cfg = load_playit_config(info.server_dir)
+            return bool(str(cfg.get("voicechat_endpoint", "")).strip())
+        except Exception:
+            return False
+
+    def check_port_conflict(self, server_id: str) -> int | None:
+        """Return the conflicting port if another running server uses this server's port, else None."""
+        info = self._servers.get(server_id)
+        if not info:
+            return None
+        cfg = self.get_config(server_id)
+        if not cfg:
+            return None
+        cfg.load()
+        my_port = cfg.get_int("server-port", 25565)
+        for sid, other in self._servers.items():
+            if sid == server_id:
+                continue
+            proc = self._processes.get(sid)
+            if not proc or not proc.is_running:
+                continue
+            try:
+                other_cfg = self.get_config(sid)
+                if not other_cfg:
+                    continue
+                other_cfg.load()
+                other_port = other_cfg.get_int("server-port", 25565)
+                if other_port == my_port:
+                    return my_port
+            except Exception:
+                pass
         return None
 
     def begin_mod_operation(self, server_id: str) -> None:

@@ -109,8 +109,7 @@ class HostyApplication(Adw.Application):
 
         if not hasattr(self, "_autostarted_once"):
             self._autostarted_once = True
-            autostart_server = self._server_manager.get_autostart_server()
-            if autostart_server:
+            for autostart_server in self._server_manager.get_autostart_servers():
                 proc = self._server_manager.get_process(autostart_server.id)
                 if proc and not proc.is_running:
                     proc.start()

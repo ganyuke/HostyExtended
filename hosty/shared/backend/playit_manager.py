@@ -24,12 +24,6 @@ from hosty.shared.core.events import EventEmitter
 from hosty.shared.utils.constants import DATA_DIR
 from hosty.shared.utils.subprocess_utils import hidden_subprocess_kwargs
 
-try:
-    import tomlkit
-except ImportError:
-    tomlkit = None
-
-
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 ENDPOINT_URL_RE = re.compile(r"(?:tcp|udp)://([A-Za-z0-9.-]+:\d{2,5})")
 ENDPOINT_HOSTPORT_RE = re.compile(r"(((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}|(?:\d{1,3}\.){3}\d{1,3}):\d{2,5})")
@@ -53,7 +47,7 @@ def _split_endpoint(endpoint: str) -> tuple[str, int | None]:
 
 
 class PlayitManager(EventEmitter):
-    """Manage a single playit tunnel subprocess."""
+    """Manage playit tunnels for multiple servers via a single agent process."""
 
     setup_url = "https://playit.gg/account/setup/wizard/new-account/third-party/third-party-code?partner=hosty"
 
@@ -166,9 +160,8 @@ class PlayitManager(EventEmitter):
         super().__init__()
 
         self._process: subprocess.Popen | None = None
-        self._server_id: str | None = None
+        self._active_server_ids: dict[str, dict] = {}
         self._status = "stopped"
-        self._public_endpoint = ""
         self._claim_url = ""
         self._read_thread: threading.Thread | None = None
         self._watch_thread: threading.Thread | None = None
@@ -188,6 +181,8 @@ class PlayitManager(EventEmitter):
         self.agent_name = f"hosty ({platform.node()})"
         self.agent_web_url = ""
         self.max_tunnels = 4
+        self.tcp_limit = 4
+        self.udp_limit = 4
         self.tunnels: dict[str, list[PlayitManager.Tunnel]] = {
             "tcp": [],
             "udp": [],
@@ -198,7 +193,6 @@ class PlayitManager(EventEmitter):
         self._agent_id: str | None = None
         self._proto_key: str | None = None
         self._secret_key: str | None = None
-        self._active_tunnel_id: str | None = None
         self._last_error = ""
 
     def _is_invalid_agent_key_error(self, detail: str) -> bool:
@@ -212,7 +206,14 @@ class PlayitManager(EventEmitter):
 
     @property
     def public_endpoint(self) -> str:
-        return self._public_endpoint
+        for info in self._active_server_ids.values():
+            if info.get("endpoint"):
+                return info["endpoint"]
+        return ""
+
+    def get_endpoint_for(self, server_id: str) -> str:
+        info = self._active_server_ids.get(server_id)
+        return info.get("endpoint", "") if info else ""
 
     @property
     def claim_url(self) -> str:
@@ -220,7 +221,7 @@ class PlayitManager(EventEmitter):
 
     @property
     def server_id(self) -> str | None:
-        return self._server_id
+        return next(iter(self._active_server_ids), None)
 
     @property
     def is_running(self) -> bool:
@@ -250,15 +251,18 @@ class PlayitManager(EventEmitter):
         return self.resolve_binary() is not None
 
     def is_running_for(self, server_id: str) -> bool:
-        return self.is_running and self._server_id == server_id
+        return self.is_running and server_id in self._active_server_ids
+
+    def get_running_server_ids(self) -> list[str]:
+        return list(self._active_server_ids.keys()) if self.is_running else []
 
     def _set_status(self, status: str):
         if self._status != status:
             self._status = status
             self.emit_on_main_thread("status-changed", status)
 
-    def _emit_endpoint_changed(self):
-        self.emit_on_main_thread("endpoint-changed", self._public_endpoint, self._claim_url)
+    def _emit_endpoint_changed(self, server_id: str = ""):
+        self.emit_on_main_thread("endpoint-changed", self.public_endpoint, self._claim_url)
 
     def _request(self, endpoint: str, **kwargs) -> dict:
         url = f"{self._api_base}/{endpoint.strip('/')}"
@@ -669,7 +673,8 @@ class PlayitManager(EventEmitter):
 
         try:
             agent_data = self._request("agents/rundata")
-            self._agent_id = str((agent_data.get("data") or {}).get("agent_id", "")) or None
+            response_data = agent_data.get("data") or {}
+            self._agent_id = str(response_data.get("agent_id", "")) or None
             if not self._agent_id:
                 self.initialized = False
                 self._last_error = "agents/rundata did not include agent_id"
@@ -712,6 +717,14 @@ class PlayitManager(EventEmitter):
         if not isinstance(tunnel_items, list):
             return self.tunnels
 
+        tcp_alloc = payload.get("tcp_alloc") or {}
+        udp_alloc = payload.get("udp_alloc") or {}
+        if "allowed" in tcp_alloc:
+            self.tcp_limit = max(1, int(tcp_alloc["allowed"]))
+        if "allowed" in udp_alloc:
+            self.udp_limit = max(1, int(udp_alloc["allowed"]))
+        self.max_tunnels = max(1, int(tcp_alloc.get("allowed", self.max_tunnels)))
+
         for tunnel_data in tunnel_items:
             try:
                 tunnel = self.Tunnel(self, tunnel_data)
@@ -729,11 +742,23 @@ class PlayitManager(EventEmitter):
         out.extend(self.tunnels["both"])
         return out
 
+    def _tunnel_exists_for_endpoint(self, endpoint: str) -> bool:
+        """Check if any tunnel in the current list matches the given endpoint."""
+        ep = endpoint.strip().lower()
+        if not ep:
+            return False
+        for tunnel in self._return_single_list():
+            if tunnel.hostname and tunnel.hostname.strip().lower() == ep:
+                return True
+            if tunnel.domain and tunnel.remote_port:
+                candidate = f"{tunnel.domain}:{tunnel.remote_port}"
+                if candidate.lower() == ep:
+                    return True
+        return False
+
     def _check_tunnel_limit(self) -> bool:
-        tunnel_count = sum(t._cost for t in self.tunnels["both"])
-        tunnel_count += sum(t._cost for t in self.tunnels["tcp"])
-        tunnel_count += sum(t._cost for t in self.tunnels["udp"])
-        return tunnel_count < self.max_tunnels
+        total = len(self.tunnels["tcp"]) + len(self.tunnels["udp"]) + len(self.tunnels["both"])
+        return total < self.max_tunnels
 
     def _read_server_port(self, server_dir: str) -> int:
         default_port = 25565
@@ -756,18 +781,19 @@ class PlayitManager(EventEmitter):
             return default_port
         return default_port
 
-    def _create_tunnel(self, port: int = 25565, protocol: str = "tcp", label: str = "") -> Tunnel | None:
-        if port not in range(1024, 65535):
+    def _create_tunnel(self, port: int = 25565, protocol: str = "tcp", label: str = "", tunnel_type: str | None = None) -> Tunnel | None:
+        if not (1024 <= port <= 65535):
             port = 25565
 
         if not self._check_tunnel_limit():
-            raise self.TunnelException(f"This account cannot create more than {self.max_tunnels} tunnel(s)")
+            raise self.TunnelException(f"This account cannot create more than {self.max_tunnels} tunnel(s). You can increase your limit here: https://playit.gg/account/upgrade")
 
-        tunnel_type = {
-            "tcp": "minecraft-java",
-            "udp": "minecraft-bedrock",
-            "both": None,
-        }.get(protocol, "minecraft-java")
+        if tunnel_type is None:
+            tunnel_type = {
+                "tcp": "minecraft-java",
+                "udp": "minecraft-bedrock",
+                "both": None,
+            }.get(protocol, "minecraft-java")
 
         safe_label = re.sub(r"[^a-zA-Z0-9-]", "-", str(label or "").strip().lower())
         safe_label = re.sub(r"-+", "-", safe_label).strip("-")
@@ -849,7 +875,7 @@ class PlayitManager(EventEmitter):
         except Exception:
             return False
 
-    def get_tunnel(self, port: int, protocol: str = "tcp", ensure: bool = False, label: str = "") -> Tunnel | None:
+    def get_tunnel(self, port: int, protocol: str = "tcp", ensure: bool = False, label: str = "", tunnel_type: str | None = None) -> Tunnel | None:
         self._retrieve_tunnels()
 
         for tunnel in self.tunnels.get(protocol, []):
@@ -865,14 +891,7 @@ class PlayitManager(EventEmitter):
         if not ensure:
             return None
 
-        if not self._check_tunnel_limit():
-            all_tunnels = sorted(self._return_single_list(), key=lambda t: t.created)
-            for tunnel in all_tunnels:
-                tunnel.delete()
-                if self._check_tunnel_limit():
-                    break
-
-        return self._create_tunnel(port, protocol, label=label)
+        return self._create_tunnel(port, protocol, label=label, tunnel_type=tunnel_type)
 
     def _start_agent_service(self, binary: str) -> bool:
         if self.is_running:
@@ -906,9 +925,16 @@ class PlayitManager(EventEmitter):
         allow_unclaimed: bool = False,
     ) -> tuple[bool, str]:
         if self.is_running:
-            if self._server_id == server_id:
-                return True, "playit is already running"
-            return False, "playit is already running for another server"
+            if server_id in self._active_server_ids:
+                return True, "playit is already running for this server"
+
+            self._active_server_ids[server_id] = {
+                "tunnel_id": None,
+                "endpoint": "",
+                "port": None,
+            }
+
+            return True, "playit agent is running"
 
         binary = self.resolve_binary()
         if not binary:
@@ -952,29 +978,16 @@ class PlayitManager(EventEmitter):
                 return False, "linked playit key is invalid; run setup again"
             return False, f"failed to initialize playit API session: {detail}"
 
-        port = self._read_server_port(server_dir)
-        protocol = "tcp"
-
-        try:
-            tunnel = self.get_tunnel(port, protocol=protocol, ensure=True, label=server_id)
-        except Exception as e:
-            return False, str(e)
-
-        if not tunnel:
-            return False, "failed to allocate a playit tunnel"
-
-        tunnel.in_use = True
-        self._active_tunnel_id = tunnel.id
-        if tunnel.hostname:
-            self._public_endpoint = tunnel.hostname
-            self._emit_endpoint_changed()
+        self._active_server_ids[server_id] = {
+            "tunnel_id": None,
+            "endpoint": "",
+            "port": None,
+        }
 
         if not self._start_agent_service(binary):
-            tunnel.in_use = False
-            self._active_tunnel_id = None
+            self._active_server_ids.pop(server_id, None)
             return False, "failed to start playit agent"
 
-        self._server_id = server_id
         self._claim_url = ""
         self._set_status("running")
 
@@ -993,71 +1006,53 @@ class PlayitManager(EventEmitter):
         secret: str = "",
         auto_install: bool = False,
     ) -> tuple[bool, str]:
-        """Regenerate the tunnel domain by replacing the server tunnel and restarting playit."""
-        if self.is_running and self._server_id != server_id:
-            return False, "playit is already running for another server"
+        """Regenerate the tunnel domain by replacing the server tunnel."""
+        # If playit is running for another server, we can still regenerate this server's tunnel
+        if self.is_running:
+            was_running_for_this = server_id in self._active_server_ids
+            if was_running_for_this:
+                self._active_server_ids.pop(server_id, None)
 
-        binary = self.resolve_binary()
-        if not binary:
-            if auto_install:
-                ok, msg = self.install_latest_binary()
-                if not ok:
-                    return False, f"playit install failed: {msg}"
-                binary = self.resolve_binary()
-            if not binary:
-                return False, "playit binary not found"
+            # Delete old tunnel and create a new one via API
+            port = self._read_server_port(server_dir)
+            protocol = "tcp"
+            self._retrieve_tunnels()
+            candidates = [tunnel for tunnel in list(self.tunnels.get(protocol, [])) if tunnel.port == int(port)]
 
-        # Ensure binary is pinned to v0.17.1 (marker avoids repeat downloads)
-        if binary and not self._is_pinned_binary():
-            ok, msg = self._download_specific_version("v0.17.1")
-            if ok:
-                binary = self.resolve_binary()
-            else:
-                return False, f"Failed to install playit v0.17.1: {msg}"
+            deleted_any = False
+            for tunnel in candidates:
+                if self._delete_tunnel(tunnel):
+                    deleted_any = True
 
-        provided_secret = str(secret or "").strip()
-        existing_secret = self.read_claimed_secret()
-        if provided_secret and not existing_secret:
-            if self._write_secret_key(provided_secret):
-                existing_secret = provided_secret
+            # Create new tunnel
+            try:
+                tunnel = self.get_tunnel(port, protocol=protocol, ensure=True, label=server_id)
+            except Exception as e:
+                return False, str(e)
 
-        if not existing_secret:
-            return False, "playit is not linked yet"
+            if not tunnel:
+                return False, "failed to allocate a new playit tunnel"
 
-        if not self.initialized and not self._initialize_with_retry(max_attempts=25, delay_seconds=1.0):
-            detail = self._last_error or "unknown error"
-            if self._is_invalid_agent_key_error(detail):
-                self.unlink_account()
-                return False, "linked playit key is invalid; run setup again"
-            return False, f"failed to initialize playit API session: {detail}"
+            tunnel.in_use = True
+            self._active_server_ids[server_id] = {
+                "tunnel_id": tunnel.id,
+                "endpoint": tunnel.hostname or "",
+                "port": port,
+            }
+            if tunnel.hostname:
+                self._emit_endpoint_changed(server_id)
 
-        port = self._read_server_port(server_dir)
-        protocol = "tcp"
+            if deleted_any:
+                return True, "playit tunnel domain regenerated"
+            return True, "playit tunnel created for this server"
 
-        if self.is_running_for(server_id):
-            self.stop()
-
-        self._retrieve_tunnels()
-        candidates = [tunnel for tunnel in list(self.tunnels.get(protocol, [])) if tunnel.port == int(port)]
-
-        deleted_any = False
-        for tunnel in candidates:
-            if self._delete_tunnel(tunnel):
-                deleted_any = True
-
-        ok, msg = self.start(
+        return self.start(
             server_id,
             server_dir,
-            secret=provided_secret or existing_secret,
+            secret=secret,
             auto_install=auto_install,
             allow_unclaimed=False,
         )
-        if not ok:
-            return False, msg
-
-        if deleted_any:
-            return True, "playit tunnel domain regenerated"
-        return True, "playit tunnel restarted"
 
     def _ensure_api_ready(self, secret: str = "", auto_install: bool = False) -> tuple[bool, str]:
         binary = self.resolve_binary()
@@ -1097,17 +1092,13 @@ class PlayitManager(EventEmitter):
         return True, ""
 
     def _resolve_tunnel_port(
-        self, server_dir: str, protocol: str, bedrock_port: int = 19132, voicechat_port: int = 24454
+        self, server_dir: str, protocol: str, bedrock_port: int = 19132
     ) -> int:
         if protocol == "tcp":
             return self._read_server_port(server_dir)
 
-        try:
-            port = int(voicechat_port if voicechat_port != 24454 else bedrock_port)
-        except Exception:
-            return 19132
-        if 1024 <= port <= 65535:
-            return port
+        if 1024 <= bedrock_port <= 65535:
+            return bedrock_port
         return 19132
 
     def _list_tunnels_for_port(self, port: int, protocol: str) -> list[Tunnel]:
@@ -1129,13 +1120,14 @@ class PlayitManager(EventEmitter):
         if not ok:
             return False, msg, ""
 
+        tunnel_type_override: str | None = None
         if tunnel_kind == "voicechat":
             port = voicechat_port if 1024 <= voicechat_port <= 65535 else 24454
-            tunnel_label = f"{server_id}-voicechat"
+            tunnel_label = "voicechat"
             display_name = "Voice Chat"
         elif tunnel_kind == "bedrock":
             port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
-            tunnel_label = f"{server_id}-bedrock"
+            tunnel_label = "bedrock"
             display_name = "Bedrock"
         else:
             port = self._resolve_tunnel_port(server_dir, protocol, bedrock_port=bedrock_port)
@@ -1148,6 +1140,7 @@ class PlayitManager(EventEmitter):
                 protocol=protocol,
                 ensure=True,
                 label=tunnel_label,
+                tunnel_type=tunnel_type_override,
             )
         except Exception as e:
             return False, str(e), ""
@@ -1157,9 +1150,22 @@ class PlayitManager(EventEmitter):
 
         endpoint = str(tunnel.hostname or "").strip()
         # For bedrock and voicechat tunnels, include the remote port in the endpoint
-        if tunnel_kind in ("bedrock", "voicechat") and tunnel.remote_port:
-            endpoint = f"{tunnel.domain}:{tunnel.remote_port}"
+        if tunnel_kind in ("bedrock", "voicechat"):
+            if tunnel.domain and tunnel.remote_port:
+                endpoint = f"{tunnel.domain}:{tunnel.remote_port}"
+            elif tunnel.domain:
+                endpoint = tunnel.domain
+
         if endpoint:
+            tunnel.in_use = True
+            if tunnel_kind not in ("bedrock", "voicechat"):
+                self._active_server_ids[server_id] = {
+                    "tunnel_id": tunnel.id,
+                    "endpoint": endpoint,
+                    "port": port,
+                }
+            if tunnel.hostname:
+                self._emit_endpoint_changed(server_id)
             return True, f"{display_name} tunnel ready: {endpoint}", endpoint
         return True, f"{display_name} tunnel created on {protocol.upper()} port {port}", ""
 
@@ -1188,9 +1194,25 @@ class PlayitManager(EventEmitter):
         candidates = self._list_tunnels_for_port(port, protocol)
 
         deleted_any = False
+        deleted_hostnames: list[str] = []
+        deleted_ids: set[str] = set()
         for tunnel in candidates:
             if self._delete_tunnel(tunnel):
                 deleted_any = True
+                if tunnel.hostname:
+                    deleted_hostnames.append(str(tunnel.hostname))
+                if tunnel.id:
+                    deleted_ids.add(str(tunnel.id))
+
+        # Clear stale _active_server_ids entries for deleted tunnels
+        for sid, sinfo in list(self._active_server_ids.items()):
+            if sinfo.get("tunnel_id") in deleted_ids:
+                self._active_server_ids[sid]["endpoint"] = ""
+                self._active_server_ids[sid]["tunnel_id"] = None
+                self._emit_endpoint_changed(sid)
+            elif sinfo.get("endpoint") in deleted_hostnames:
+                self._active_server_ids[sid]["endpoint"] = ""
+                self._emit_endpoint_changed(sid)
 
         ok, msg, endpoint = self._add_tunnel_for_protocol(
             server_id,
@@ -1250,15 +1272,46 @@ class PlayitManager(EventEmitter):
         if not deleted_any:
             return False, f"Failed to delete {display_name.lower()} tunnel"
 
-        if self._active_tunnel_id and self._active_tunnel_id in deleted_ids:
-            self._active_tunnel_id = None
-            self._public_endpoint = ""
-            self._emit_endpoint_changed()
-        elif self._public_endpoint and self._public_endpoint in deleted_hostnames:
-            self._public_endpoint = ""
-            self._emit_endpoint_changed()
+        # Clear matching tunnel info from any server
+        for server_id, info in list(self._active_server_ids.items()):
+            if info.get("tunnel_id") in deleted_ids:
+                self._active_server_ids[server_id]["endpoint"] = ""
+                self._active_server_ids[server_id]["tunnel_id"] = None
+                self._emit_endpoint_changed(server_id)
+            elif info.get("endpoint") in deleted_hostnames:
+                self._active_server_ids[server_id]["endpoint"] = ""
+                self._emit_endpoint_changed(server_id)
 
         return True, f"{display_name} tunnel deleted"
+
+    def _delete_tunnels_by_port(self, port: int, protocol: str) -> tuple[bool, str]:
+        candidates = self._list_tunnels_for_port(port, protocol)
+        if not candidates:
+            return True, "no tunnels to delete"
+
+        deleted_any = False
+        deleted_hostnames: list[str] = []
+        deleted_ids: set[str] = set()
+        for tunnel in candidates:
+            if self._delete_tunnel(tunnel):
+                deleted_any = True
+                if tunnel.hostname:
+                    deleted_hostnames.append(str(tunnel.hostname))
+                if tunnel.id:
+                    deleted_ids.add(str(tunnel.id))
+
+        for sid, sinfo in list(self._active_server_ids.items()):
+            if sinfo.get("tunnel_id") in deleted_ids:
+                self._active_server_ids[sid]["endpoint"] = ""
+                self._active_server_ids[sid]["tunnel_id"] = None
+                self._emit_endpoint_changed(sid)
+            elif sinfo.get("endpoint") in deleted_hostnames:
+                self._active_server_ids[sid]["endpoint"] = ""
+                self._emit_endpoint_changed(sid)
+
+        if not deleted_any:
+            return False, f"failed to delete tunnels for port {port}"
+        return True, f"deleted {len(deleted_ids)} tunnel(s) for port {port}"
 
     def add_java_tunnel(
         self,
@@ -1545,20 +1598,20 @@ class PlayitManager(EventEmitter):
         except Exception:
             return False
 
-    def _write_voicechat_toml_fallback(
+    def _write_voicechat_properties(
         self,
         config_file: Path,
-        remote_port: int,
+        local_port: int,
         domain: str = "",
     ) -> bool:
         try:
             lines = config_file.read_text(encoding="utf-8").splitlines() if config_file.exists() else []
             replacements = {
-                "port": f"port = {remote_port}",
-                "bind_address": 'bind_address = "0.0.0.0"',
+                "port": f"port={local_port}",
+                "bind_address": "bind_address=0.0.0.0",
             }
             if domain:
-                replacements["voice_host"] = f'voice_host = "{domain}"'
+                replacements["voice_host"] = f"voice_host={domain}"
             seen: set[str] = set()
             out: list[str] = []
             for line in lines:
@@ -1582,20 +1635,19 @@ class PlayitManager(EventEmitter):
         server_dir: str,
         server_id: str,
         endpoint: str = "",
+        voicechat_port: int = 0,
     ) -> bool:
         """Auto-configure Simple Voice Chat mod to use the playit tunnel.
 
         1) Extract the assigned UDP address and port from the local Playit agent's status/API.
-        2) Use tomlkit to open config/voicechat/voicechat-server.toml.
+        2) Open config/voicechat/voicechat-server.properties.
         3) Overwrite port, voice_host, and bind_address.
-        4) Save the TOML file safely.
+        4) Save the file, clean up any stale .toml sibling.
         """
-        # 1) Extract info
         domain, remote_port = _split_endpoint(endpoint)
         voice_tunnel = None
         if not domain or not remote_port:
             self._retrieve_tunnels()
-            # The label used in _add_tunnel_for_protocol
             label_prefix = f"hosty-{re.sub(r'[^a-zA-Z0-9-]', '-', server_id.lower())}-voicechat"
 
             for tunnel in self.tunnels.get("udp", []):
@@ -1610,47 +1662,26 @@ class PlayitManager(EventEmitter):
                 domain = ""
                 remote_port = 24454
 
-        # Update Playit to forward to the same port locally so the mod can bind to it.
-        if voice_tunnel and voice_tunnel.port != remote_port:
-            if self._update_tunnel_local_port(voice_tunnel.id, remote_port):
-                voice_tunnel.port = remote_port
+        local_port = voicechat_port if 1024 <= voicechat_port <= 65535 else remote_port
 
-        # 2) Open TOML
+        # Update Playit to forward to the same port locally so the mod can bind to it.
+        if voice_tunnel and voice_tunnel.port != local_port:
+            if self._update_tunnel_local_port(voice_tunnel.id, local_port):
+                voice_tunnel.port = local_port
+
         config_dir = Path(server_dir) / "config" / "voicechat"
-        config_file = config_dir / "voicechat-server.toml"
         config_dir.mkdir(parents=True, exist_ok=True)
 
-        if tomlkit is None:
-            return self._write_voicechat_toml_fallback(config_file, remote_port, domain)
+        # Remove stale .toml file — modern SVC only reads .properties
+        old_toml = config_dir / "voicechat-server.toml"
+        if old_toml.exists():
+            try:
+                old_toml.unlink()
+            except Exception:
+                pass
 
-        try:
-            if config_file.exists():
-                content = config_file.read_text(encoding="utf-8")
-                doc = tomlkit.parse(content)
-            else:
-                doc = tomlkit.document()
-        except Exception:
-            return False
-
-        # 3) Overwrite keys
-        # Simple Voice Chat TOML structure usually has these at root or in [general]
-        # We'll set them at root or where they exist.
-        if "general" in doc and isinstance(doc["general"], dict):
-            target = doc["general"]
-        else:
-            target = doc
-
-        target["port"] = remote_port
-        if domain:
-            target["voice_host"] = domain
-        target["bind_address"] = "0.0.0.0"
-
-        # 4) Save
-        try:
-            config_file.write_text(tomlkit.dumps(doc), encoding="utf-8")
-            return True
-        except Exception:
-            return False
+        config_file = config_dir / "voicechat-server.properties"
+        return self._write_voicechat_properties(config_file, local_port, domain)
 
     def verify_playit_mod_configs(
         self,
@@ -1658,11 +1689,13 @@ class PlayitManager(EventEmitter):
         server_id: str,
         bedrock_endpoint: str = "",
         voicechat_endpoint: str = "",
+        bedrock_port: int = 19132,
+        voicechat_port: int = 24454,
     ) -> dict[str, bool]:
         """Best-effort background repair for playit-backed mod config files."""
         result = {"geyser": False, "voicechat": False}
         if str(bedrock_endpoint or "").strip():
-            result["geyser"] = self.configure_geyser_mod(server_dir, 19132)
+            result["geyser"] = self.configure_geyser_mod(server_dir, bedrock_port)
             mods_dir = Path(server_dir) / "mods"
             has_floodgate = False
             try:
@@ -1676,14 +1709,103 @@ class PlayitManager(EventEmitter):
                 server_dir,
                 server_id,
                 endpoint=voicechat_endpoint,
+                voicechat_port=voicechat_port,
             )
         return result
 
+    def auto_create_tunnel_mods(
+        self,
+        server_id: str,
+        server_dir: str,
+        secret: str = "",
+        bedrock_port: int = 19132,
+        voicechat_port: int = 24454,
+    ) -> dict[str, str]:
+        """Auto-create bedrock/voicechat tunnels if mods are installed and no tunnel exists yet.
+
+        Also validates existing tunnel endpoints — if a configured endpoint no longer has
+        a matching tunnel on playit's side (e.g. deleted via dashboard), the endpoint is
+        cleared and a new tunnel is created.
+
+        Returns dict with "bedrock_endpoint" and "voicechat_endpoint" (empty if not created).
+        """
+        from hosty.shared.backend.playit_config import load_playit_config, save_playit_config
+        result = {"bedrock_endpoint": "", "voicechat_endpoint": ""}
+        cfg = load_playit_config(server_dir)
+        mods_dir = Path(server_dir) / "mods"
+        dirty = False
+
+        # Refresh tunnel list and validate existing endpoints
+        self._retrieve_tunnels()
+
+        bedrock_ep = str(cfg.get("bedrock_endpoint", "")).strip()
+        if bedrock_ep and not self._tunnel_exists_for_endpoint(bedrock_ep):
+            cfg["bedrock_endpoint"] = ""
+            bedrock_ep = ""
+            dirty = True
+
+        if not bedrock_ep:
+            has_geyser = False
+            try:
+                has_geyser = any("geyser" in jar.stem.lower() for jar in mods_dir.glob("*.jar"))
+            except Exception:
+                pass
+            if has_geyser:
+                ok, _msg, endpoint = self.add_bedrock_tunnel(
+                    server_id, server_dir, secret=secret, auto_install=True, bedrock_port=bedrock_port,
+                )
+                if ok and endpoint:
+                    cfg["bedrock_endpoint"] = endpoint
+                    result["bedrock_endpoint"] = endpoint
+                    dirty = True
+
+        vc_ep = str(cfg.get("voicechat_endpoint", "")).strip()
+        if vc_ep and not self._tunnel_exists_for_endpoint(vc_ep):
+            cfg["voicechat_endpoint"] = ""
+            vc_ep = ""
+            dirty = True
+
+        if not vc_ep:
+            has_vc = False
+            try:
+                has_vc = any("voice-chat" in jar.stem.lower() or "simple-voice-chat" in jar.stem.lower()
+                             for jar in mods_dir.glob("*.jar"))
+            except Exception:
+                pass
+            if has_vc:
+                ok, _msg, endpoint = self.add_voicechat_tunnel(
+                    server_id, server_dir, secret=secret, auto_install=True, voicechat_port=voicechat_port,
+                )
+                if ok and endpoint:
+                    cfg["voicechat_endpoint"] = endpoint
+                    result["voicechat_endpoint"] = endpoint
+                    dirty = True
+
+        if dirty:
+            save_playit_config(server_dir, cfg)
+
+        return result
+
+    def stop_server(self, server_id: str) -> tuple[bool, str]:
+        """Stop playit for a specific server. Keeps agent running for other servers.
+
+        The tunnel is NOT deleted so the same domain is reused on next start.
+        """
+        if server_id not in self._active_server_ids:
+            return True, "playit is not running for this server"
+
+        self._active_server_ids.pop(server_id)
+        self._emit_endpoint_changed(server_id)
+
+        if not self._active_server_ids:
+            return self.stop()
+
+        return True, "playit stopped for this server"
+
     def stop(self) -> tuple[bool, str]:
         if not self.is_running:
-            self._server_id = None
+            self._active_server_ids.clear()
             self._clear_active_tunnel_usage()
-            self._public_endpoint = ""
             self._claim_url = ""
             self._emit_endpoint_changed()
             self._set_status("stopped")
@@ -1701,9 +1823,8 @@ class PlayitManager(EventEmitter):
                 pass
         finally:
             self._process = None
-            self._server_id = None
+            self._active_server_ids.clear()
             self._clear_active_tunnel_usage()
-            self._public_endpoint = ""
             self._claim_url = ""
             self._emit_endpoint_changed()
             self._set_status("stopped")
@@ -1711,15 +1832,15 @@ class PlayitManager(EventEmitter):
         return True, "playit stopped"
 
     def _clear_active_tunnel_usage(self):
-        if not self._active_tunnel_id:
+        active_tunnel_ids = {info["tunnel_id"] for info in self._active_server_ids.values() if info.get("tunnel_id")}
+        if not active_tunnel_ids:
+            for tunnel in self._return_single_list():
+                tunnel.in_use = False
             return
 
         for tunnel in self._return_single_list():
-            if tunnel.id == self._active_tunnel_id:
+            if tunnel.id in active_tunnel_ids:
                 tunnel.in_use = False
-                break
-
-        self._active_tunnel_id = None
 
     def _read_output(self):
         p = self._process
@@ -1767,15 +1888,34 @@ class PlayitManager(EventEmitter):
         candidates.extend(ENDPOINT_URL_RE.findall(text))
         candidates.extend(ENDPOINT_HOSTPORT_RE.findall(text))
 
-        best = self._pick_best_endpoint(candidates)
-        if not best:
+        if not candidates:
             return
 
-        current_score = self._endpoint_score(self._public_endpoint) if self._public_endpoint else -1
-        best_score = self._endpoint_score(best)
-        if best_score > current_score or (best_score == current_score and best != self._public_endpoint):
-            self._public_endpoint = best
-            self._emit_endpoint_changed()
+        # Try to match parsed endpoints to known tunnels
+        self._retrieve_tunnels()
+        all_tunnels = self._return_single_list()
+
+        for candidate in candidates:
+            candidate_clean = candidate.strip().lower()
+            for server_id, info in list(self._active_server_ids.items()):
+                current_ep = info.get("endpoint", "").strip().lower()
+                if current_ep == candidate_clean:
+                    continue
+                # Check if this candidate belongs to this server's tunnel
+                tunnel_id = info.get("tunnel_id")
+                if tunnel_id:
+                    for tunnel in all_tunnels:
+                        if tunnel.id != tunnel_id or not tunnel.hostname:
+                            continue
+                        if tunnel.hostname.strip().lower() == candidate_clean:
+                            self._active_server_ids[server_id]["endpoint"] = tunnel.hostname.strip()
+                            self._emit_endpoint_changed(server_id)
+                            break
+                # If no tunnel_id match, update the first unmatched server
+                if not info.get("endpoint"):
+                    self._active_server_ids[server_id]["endpoint"] = candidate
+                    self._emit_endpoint_changed(server_id)
+                    break
 
     def _pick_best_endpoint(self, candidates: list[str]) -> str:
         best = ""
@@ -1830,9 +1970,8 @@ class PlayitManager(EventEmitter):
         finally:
             if self._process is p:
                 self._process = None
-                self._server_id = None
+                self._active_server_ids.clear()
                 self._clear_active_tunnel_usage()
-                self._public_endpoint = ""
                 self._claim_url = ""
                 self._emit_endpoint_changed()
                 self._set_status("stopped")

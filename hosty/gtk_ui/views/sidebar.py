@@ -101,7 +101,7 @@ class ServerRow(Adw.ActionRow):
     def attach_existing_process(self):
         """Attach to an already created process, if present."""
         process = self._server_manager.get_existing_process(self.server_info.id)
-        if process is self._process:
+        if process is self._process and process is not None:
             return
 
         self._disconnect_process_handlers()
