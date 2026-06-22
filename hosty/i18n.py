@@ -53,9 +53,7 @@ def set_language(lang_code: str) -> None:
         builtins._ = gettext.gettext
     else:
         try:
-            translation = gettext.translation(
-                "hosty", _localedir, languages=[lang_code]
-            )
+            translation = gettext.translation("hosty", _localedir, languages=[lang_code])
             builtins._ = translation.gettext
             os.environ["LANGUAGE"] = lang_code
         except Exception:
