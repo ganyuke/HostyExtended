@@ -7,6 +7,14 @@ import gettext
 import os
 import sys
 
+LANGUAGES: dict[str, str] = {
+    "system": "System default",
+    "en": "English",
+    "pl": "Polski",
+}
+
+_localedir: str | None = None
+
 
 def _default_localedir() -> str:
     """Return the default locale directory for the current environment."""
@@ -19,8 +27,10 @@ def _default_localedir() -> str:
 
 def setup_gettext(localedir: str | None = None) -> None:
     """Initialize gettext and install _() into builtins."""
+    global _localedir
     if localedir is None:
         localedir = _default_localedir()
+    _localedir = localedir
 
     try:
         gettext.bindtextdomain("hosty", localedir)
@@ -29,6 +39,33 @@ def setup_gettext(localedir: str | None = None) -> None:
         pass
 
     builtins._ = gettext.gettext
+
+
+def set_language(lang_code: str) -> None:
+    """Switch the active translation at runtime."""
+    if lang_code == "system" or not lang_code:
+        os.environ.pop("LANGUAGE", None)
+        try:
+            gettext.bindtextdomain("hosty", _localedir)
+            gettext.textdomain("hosty")
+        except Exception:
+            pass
+        builtins._ = gettext.gettext
+    else:
+        try:
+            translation = gettext.translation(
+                "hosty", _localedir, languages=[lang_code]
+            )
+            builtins._ = translation.gettext
+            os.environ["LANGUAGE"] = lang_code
+        except Exception:
+            os.environ.pop("LANGUAGE", None)
+            try:
+                gettext.bindtextdomain("hosty", _localedir)
+                gettext.textdomain("hosty")
+            except Exception:
+                pass
+            builtins._ = gettext.gettext
 
 
 setup_gettext()

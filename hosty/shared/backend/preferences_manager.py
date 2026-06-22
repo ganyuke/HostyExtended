@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "auto_backup_on_stop": True,
     "auto_resolve_mod_dependencies": True,
     "theme": "system",
+    "language": "system",
 }
 
 
@@ -112,3 +113,12 @@ class PreferencesManager:
         if value in ("system", "light", "dark"):
             self._settings["theme"] = value
             self._save()
+
+    @property
+    def language(self) -> str:
+        return self._settings.get("language", "system")
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._settings["language"] = value
+        self._save()

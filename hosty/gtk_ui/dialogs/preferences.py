@@ -13,11 +13,11 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
+from hosty.i18n import LANGUAGES
+from hosty.i18n import set_language as set_app_language
 from hosty.shared.backend.preferences_manager import PreferencesManager
 from hosty.shared.backend.server_manager import ServerManager
-from hosty.shared.utils.constants import (
-    DATA_DIR,
-)
+from hosty.shared.utils.constants import DATA_DIR
 
 
 def _open_data_folder() -> None:
@@ -120,6 +120,27 @@ def show_preferences_window(
 
     dep_row.connect("notify::active", on_dep_toggled)
     group.add(dep_row)
+
+    lang_keys = list(LANGUAGES.keys())
+    lang_names = list(LANGUAGES.values())
+    language_model = Gtk.StringList.new(lang_names)
+
+    lang_row = Adw.ComboRow(
+        title=_("Language"),
+        subtitle=_("Requires restart for changes to take effect"),
+        model=language_model,
+    )
+    current_lang = preferences.language
+    lang_row.set_selected(lang_keys.index(current_lang) if current_lang in lang_keys else 0)
+
+    def on_language_changed(row, _pspec):
+        selected = row.get_selected()
+        lang_code = lang_keys[selected]
+        preferences.language = lang_code
+        set_app_language(lang_code)
+
+    lang_row.connect("notify::selected", on_language_changed)
+    group.add(lang_row)
 
     page.add(group)
 

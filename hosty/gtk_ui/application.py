@@ -15,7 +15,7 @@ from pathlib import Path
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from hosty.gtk_ui.window import HostyWindow
-from hosty.i18n import setup_gettext
+from hosty.i18n import set_language, setup_gettext
 from hosty.shared.backend.server_manager import ServerManager
 from hosty.shared.core.events import set_main_thread_dispatcher
 from hosty.shared.utils.constants import APP_ID
@@ -57,6 +57,9 @@ class HostyApplication(Adw.Application):
 
         # Initialize server manager
         self._server_manager = ServerManager()
+
+        # Apply saved language preference
+        set_language(self._server_manager.preferences.language)
 
         # Setup actions
         self._setup_actions()
