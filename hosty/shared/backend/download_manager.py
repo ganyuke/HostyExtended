@@ -222,7 +222,8 @@ class DownloadManager:
             resp.raise_for_status()
             data = resp.json()
             versions = data.get("versions") or []
-            return [str(v) for v in versions if str(v).strip()]
+            # purpur API returns oldest versions first, so reverse the list
+            return [str(v) for v in versions if str(v).strip()][::-1]
         except Exception as e:
             print(f"Failed to fetch Purpur versions: {e}")
             return []
@@ -234,10 +235,14 @@ class DownloadManager:
             data = resp.json()
             builds = data.get("builds") or {}
             if isinstance(builds, dict):
-                keys = [int(k) for k in builds.keys() if str(k).isdigit()]
-                return str(max(keys)) if keys else None
-            if isinstance(builds, list) and builds:
-                return str(builds[-1])
+                # purpur API returns "latest" and "all" (which is list in oldest to newest order)
+                # so we need to get the latest build
+                latest = builds.get("latest") or None
+                if latest:
+                    return str(latest)  
+                all_builds = builds.get("all") or []
+                if all_builds:
+                    return str(all_builds[-1])
             return None
         except Exception as e:
             print(f"Failed to fetch Purpur build for {mc_version}: {e}")
